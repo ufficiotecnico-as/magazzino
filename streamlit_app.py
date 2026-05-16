@@ -2,8 +2,8 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 import io
-import json
 import base64
+import numpy as np
 from PIL import Image
 
 # Libreria Ufficiale Nativa per la Firma Grafica
@@ -13,7 +13,7 @@ try:
 except ImportError:
     CANVAS_AVAILABLE = False
 
-# Librerie di archiviazione
+# Librerie di archiviazione Google
 try:
     import gspread
     from google.oauth2 import service_account
@@ -28,7 +28,7 @@ try:
 except ImportError:
     GOOGLE_DRIVE_AVAILABLE = False
 
-# Libreria per la generazione di PDF stabili
+# Libreria per la generazione di PDF
 try:
     from fpdf import FPDF
     FPDF_AVAILABLE = True
@@ -128,7 +128,7 @@ def carica_su_sheet(df, nome_scheda):
         worksheet.update(valori)
     except Exception: pass
 
-# --- GENERAZIONE PDF CON FIRMA INTEGRATA E DINAMICA ---
+# --- GENERAZIONE PDF CON FIRMA INTEGRATA ---
 def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione, firma_array_np=None, utente_loggato="Ufficio Tecnico"):
     if not FPDF_AVAILABLE:
         return b"Errore libreria PDF"
@@ -137,7 +137,7 @@ def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione, 
     pdf.add_page()
     pdf.set_font("Arial", "B", 16)
     
-    # Intestazione Istituto
+    # Intestazione Scuola
     pdf.cell(190, 10, "ISTITUTO SUPERIORE ANTONIO SCARPA", ln=True, align="C")
     pdf.set_font("Arial", "", 12)
     pdf.cell(190, 10, "Piattaforma di Gestione Logistica e Comodati d'Uso", ln=True, align="C")
@@ -157,7 +157,7 @@ def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione, 
     pdf.cell(190, 8, f"Bene Associato (ID/Modello): {bene}", ln=True)
     pdf.ln(10)
     
-    # Clausola Note Legali
+    # Clausole Legali
     pdf.set_font("Arial", "I", 10)
     if tipo_operazione == "CONSEGNA":
         nota = "Il sottoscritto dichiara di ricevere l'oggetto sopra indicato in perfetto stato di funzionamento e si impegna a custodirlo con la massima diligenza del buon padre di famiglia, restituendolo su richiesta dell'Istituto."
@@ -169,11 +169,8 @@ def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione, 
     # Blocco Firme
     pdf.set_font("Arial", "B", 11)
     
-    # Gestione utenza: Forziamo "Ufficio Tecnico" se l'operatore è admin
-    if str(utente_loggato).lower() in ["admin", "amministratore"]:
-        firma_admin_testo = "Ufficio Tecnico"
-    else:
-        firma_admin_testo = str(utente_loggato)
+    # Forziamo la dicitura Ufficio Tecnico se loggati come admin
+    firma_admin_testo = "Ufficio Tecnico" if str(utente_loggato).lower() in ["admin", "amministratore"] else str(utente_loggato)
     
     y_posizione_firme = pdf.get_y()
     pdf.cell(95, 8, "Per l'Amministrazione: ", align="L")
@@ -182,12 +179,10 @@ def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione, 
     pdf.set_font("Arial", "I", 10)
     pdf.cell(95, 8, f"F.to {firma_admin_testo}", align="L")
     
-    # Incolla direttamente la firma convertendo la matrice NumPy in JPEG
+    # Incolla la firma se presente ed elaborata
     if firma_array_np is not None:
         try:
             img = Image.fromarray(firma_array_np.astype('uint8'), 'RGBA')
-            
-            # Crea un fondo bianco per rimuovere la trasparenza
             background = Image.new(mode='RGB', size=img.size, color=(255, 255, 255))
             background.paste(img, box=None, mask=img.split()[3])
             
@@ -220,8 +215,7 @@ def carica_su_drive_unico(file_bytes, nome_file, mime_type, nome_cartella_dest):
         risultato = service.files().list(q=query, spaces='drive', supportsAllDrives=True, includeItemsFromAllDrives=True).execute()
         files = risultato.get('files', [])
         
-        if files:
-            id_cartella = files[0]['id']
+        if files: id_cartella = files[0]['id']
         else:
             meta_cartella = {'name': nome_cartella_dest, 'mimeType': 'application/vnd.google-apps.folder', 'parents': [ID_CARTELLA_DRIVE_PRINCIPALE]}
             id_cartella = service.files().create(body=meta_cartella, fields='id', supportsAllDrives=True).execute().get('id')
@@ -238,7 +232,7 @@ if "ruolo_utente" not in st.session_state: st.session_state.ruolo_utente = None
 if "utente_corrente" not in st.session_state: st.session_state.utente_corrente = ""
 if "magazzino_selezionato" not in st.session_state: st.session_state.magazzino_selezionato = None
 
-# Router Accesso Principale
+# Login View
 if st.session_state.ruolo_utente is None:
     col_l, col_c, col_r = st.columns([1, 1.8, 1])
     with col_c:
@@ -267,7 +261,7 @@ if st.session_state.ruolo_utente is None:
                         st.rerun()
                     else: st.error("Codice non valido.")
 else:
-    # Top bar
+    # Barra Superiore
     col_t, col_b_logout = st.columns([4, 1])
     with col_t: st.markdown(f"Accesso: **{st.session_state.utente_corrente.upper()}**")
     with col_b_logout:
@@ -277,7 +271,7 @@ else:
             
     st.image(URL_LOGO, use_container_width=True)
 
-    # --- AREA AMMINISTRATORE & COMODATI ---
+    # --- MAIN ADMIN INTERFACE ---
     if st.session_state.ruolo_utente == "admin":
         tab_magazzini, tab_comodati = st.tabs(["📊 MAGAZZINI LOGISTICI", "✍️ GESTIONE COMODATI (PC & CHIAVI)"])
         
@@ -324,57 +318,64 @@ else:
                     
                     st.markdown("#### 🖊️ Firma sul Tablet qui sotto:")
                     
-                    # --- INTEGRATION OF OFFICIAL STREAMLIT CANVAS COMPONENT ---
+                    # Area Disegno Firma Nativa
                     if CANVAS_AVAILABLE:
                         canvas_risultato = st_canvas(
                             fill_color="rgba(255, 255, 255, 0)",
-                            stroke_width=3,
+                            stroke_width=4,
                             stroke_color="#000000",
                             background_color="#ffffff",
-                            height=150,
+                            height=160,
                             width=550,
                             drawing_mode="freedraw",
-                            key="canvas_firma_nativo"
+                            key="canvas_nuovo_firmato"
                         )
                         firma_data_np = canvas_risultato.image_data
                     else:
-                        st.error("Per sbloccare il modulo firma, scrivi 'streamlit-drawable-canvas' nel file requirements.txt del tuo server.")
+                        st.error("Installa 'streamlit-drawable-canvas' nel file requirements.txt")
                         firma_data_np = None
 
                     if st.button("✍️ Approva, Genera Verbale e Salva PDF su Google Drive", type="primary", use_container_width=True):
                         if nom_sog.strip():
-                            # Controlliamo nativamente se l'utente ha effettivamente disegnato qualcosa sulla matrice
-                            if firma_data_np is None or not (firma_data_np[:, :, 3] > 0).any():
-                                st.error("⚠️ Errore: Devi apporre la firma nel riquadro sopra prima di poter salvare il documento.")
+                            # CONTROLLO FIRMA INTEGRATO: Verifica se l'utente ha mosso la penna/dito alterando il foglio bianco
+                            ha_firmato = False
+                            if firma_data_np is not None:
+                                if np.any(firma_data_np[:, :, 3] > 0) and not np.all(firma_data_np[:, :, :3] == 255):
+                                    ha_firmato = True
+                            
+                            if not ha_firmato:
+                                st.error("⚠️ Attenzione: È necessario apporre la firma sul tablet prima di salvare il PDF.")
                             else:
-                                id_com = int(df_reg_comodati["id_comodato"].astype(float).max()) + 1 if not df_reg_comodati.empty else 1001
-                                data_ora = datetime.now().strftime("%d/%m/%Y %H:%M")
-                                
-                                # Generazione PDF con Firma incollata e Operatore = Ufficio Tecnico
-                                pdf_output_bytes = genera_pdf_comodato(id_com, nom_sog.strip(), tipo_sog, bene_sel, data_ora, "CONSEGNA", firma_data_np, st.session_state.utente_corrente)
-                                
-                                # Upload su Drive senza duplicazioni
-                                nome_file_pdf = f"Verbale_Consegna_{id_com}_{nom_sog.replace(' ', '_')}.pdf"
-                                carica_su_drive_unico(pdf_output_bytes, nome_file_pdf, "application/pdf", "Comodati_Consegne")
-                                
-                                # Database Google Sheets
-                                nuova_r = pd.DataFrame([{"id_comodato": id_com, "tipo_soggetto": tipo_sog, "nominativo": nom_sog.strip(), "id_bene": bene_sel, "data_consegna": data_ora, "stato_comodato": "In Corso"}])
-                                df_reg_comodati = pd.concat([df_reg_comodati, nuova_r], ignore_index=True)
-                                carica_su_sheet(df_reg_comodati, "Registro_Comodati")
-                                
-                                df_inv_comodati.loc[df_inv_comodati["id_bene"] == bene_sel, "stato"] = "Assegnato"
-                                carica_su_sheet(df_inv_comodati, "Inventario_Comodati")
-                                
-                                st.success(f"🚀 Verbale PDF N°{id_com} registrato con successo! Firma incorporata e Firmatario impostato come Ufficio Tecnico.")
-                                st.rerun()
+                                with st.spinner("Generazione ed upload del documento in corso..."):
+                                    id_com = int(df_reg_comodati["id_comodato"].astype(float).max()) + 1 if not df_reg_comodati.empty else 1001
+                                    data_ora = datetime.now().strftime("%d/%m/%Y %H:%M")
+                                    
+                                    # Genera file PDF
+                                    pdf_output_bytes = genera_pdf_comodato(id_com, nom_sog.strip(), tipo_sog, bene_sel, data_ora, "CONSEGNA", firma_data_np, st.session_state.utente_corrente)
+                                    nome_file_pdf = f"Verbale_Consegna_{id_com}_{nom_sog.replace(' ', '_')}.pdf"
+                                    
+                                    # Carica su Google Drive
+                                    if carica_su_drive_unico(pdf_output_bytes, nome_file_pdf, "application/pdf", "Comodati_Consegne"):
+                                        # Scrive sul Registro Excel Cloud
+                                        nuova_r = pd.DataFrame([{"id_comodato": id_com, "tipo_soggetto": tipo_sog, "nominativo": nom_sog.strip(), "id_bene": bene_sel, "data_consegna": data_ora, "stato_comodato": "In Corso"}])
+                                        df_reg_comodati = pd.concat([df_reg_comodati, nuova_r], ignore_index=True)
+                                        carica_su_sheet(df_reg_comodati, "Registro_Comodati")
+                                        
+                                        # Aggiorna Stato Inventario
+                                        df_inv_comodati.loc[df_inv_comodati["id_bene"] == bene_sel, "stato"] = "Assegnato"
+                                        carica_su_sheet(df_inv_comodati, "Inventario_Comodati")
+                                        
+                                        st.success(f"🚀 Verbale PDF N°{id_com} archiviato con successo con intestazione 'Ufficio Tecnico'!")
+                                        st.rerun()
+                                    else:
+                                        st.error("Impossibile caricare su Drive. Verifica le credenziali cloud.")
                         else:
-                            st.error("Inserisci il nome completo dell'assegnatario prima di procedere.")
+                            st.error("Inserisci il nome completo dell'assegnatario.")
                             
             with sub_registro:
                 st.markdown("### Registro Contratti Attivi")
                 attivi = df_reg_comodati[df_reg_comodati["stato_comodato"] == "In Corso"] if not df_reg_comodati.empty else pd.DataFrame()
-                if attivi.empty:
-                    st.info("Nessun comodato attivo.")
+                if attivi.empty: st.info("Nessun comodato attivo.")
                 else:
                     for id_x, riga in attivi.iterrows():
                         with st.container(border=True):
@@ -385,23 +386,18 @@ else:
                             with c2:
                                 if st.button("Riconsegna ↩", key=f"ric_{riga['id_comodato']}", type="primary", use_container_width=True):
                                     data_rientro = datetime.now().strftime("%d/%m/%Y %H:%M")
-                                    
-                                    # Genera PDF di Riconsegna
                                     pdf_rientro_bytes = genera_pdf_comodato(riga['id_comodato'], riga['nominativo'], riga['tipo_soggetto'], riga['id_bene'], data_rientro, "RICONSEGNA", utente_loggato=st.session_state.utente_corrente)
-                                    nome_file_rientro = f"Ricevuta_Riconsegna_{riga['id_comodato']}.pdf"
-                                    carica_su_drive_unico(pdf_rientro_bytes, nome_file_rientro, "application/pdf", "Comodati_Riconsegne")
                                     
-                                    # Aggiorna Fogli
+                                    carica_su_drive_unico(pdf_rientro_bytes, f"Ricevuta_Riconsegna_{riga['id_comodato']}.pdf", "application/pdf", "Comodati_Riconsegne")
+                                    
                                     df_reg_comodati.loc[df_reg_comodati["id_comodato"].astype(str) == str(riga["id_comodato"]), "stato_comodato"] = f"Riconsegnato il {data_rientro}"
                                     carica_su_sheet(df_reg_comodati, "Registro_Comodati")
                                     
                                     df_inv_comodati.loc[df_inv_comodati["id_bene"] == riga["id_bene"], "stato"] = "Disponibile"
                                     carica_su_sheet(df_inv_comodati, "Inventario_Comodati")
-                                    
-                                    st.success("Bene rientrato in inventario e Ricevuta di Riconsegna PDF generata!")
                                     st.rerun()
 
-    # --- AREA RICHIESTE COLLABORATORE ---
+    # --- INTERFACCIA COLLABORATORI ---
     elif st.session_state.ruolo_utente == "collaboratore":
         st.markdown("### Nuova Richiesta Materiali")
         st.info("Area Richieste allineata ed attiva.")
