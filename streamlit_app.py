@@ -236,6 +236,7 @@ if "magazzino_selezionato" not in st.session_state: st.session_state.magazzino_s
 if st.session_state.ruolo_utente is None:
     col_l, col_c, col_r = st.columns([1, 1.8, 1])
     with col_c:
+        # Corretto con use_container_width per prevenire il blocco ImageMixin
         st.image(URL_LOGO, use_container_width=True)
         st.markdown("<h2 style='text-align: center;'>Piattaforma Logistica di Istituto</h2>", unsafe_allow_html=True)
         with st.container(border=True):
@@ -269,6 +270,7 @@ else:
             st.session_state.ruolo_utente = None
             st.rerun()
             
+    # Sostituito use_width=True con use_container_width=True per rimuovere il crash
     st.image(URL_LOGO, use_container_width=True)
 
     # --- MAIN ADMIN INTERFACE ---
@@ -337,7 +339,7 @@ else:
 
                     if st.button("✍️ Approva, Genera Verbale e Salva PDF su Google Drive", type="primary", use_container_width=True):
                         if nom_sog.strip():
-                            # CONTROLLO FIRMA INTEGRATO: Verifica se l'utente ha mosso la penna/dito alterando il foglio bianco
+                            # CONTROLLO FIRMA STRUTTURATO: Verifica se ci sono pixel tracciati sul canvas
                             ha_firmato = False
                             if firma_data_np is not None:
                                 if np.any(firma_data_np[:, :, 3] > 0) and not np.all(firma_data_np[:, :, :3] == 255):
@@ -356,7 +358,7 @@ else:
                                     
                                     # Carica su Google Drive
                                     if carica_su_drive_unico(pdf_output_bytes, nome_file_pdf, "application/pdf", "Comodati_Consegne"):
-                                        # Scrive sul Registro Excel Cloud
+                                        # Scrive sul Registro Cloud
                                         nuova_r = pd.DataFrame([{"id_comodato": id_com, "tipo_soggetto": tipo_sog, "nominativo": nom_sog.strip(), "id_bene": bene_sel, "data_consegna": data_ora, "stato_comodato": "In Corso"}])
                                         df_reg_comodati = pd.concat([df_reg_comodati, nuova_r], ignore_index=True)
                                         carica_su_sheet(df_reg_comodati, "Registro_Comodati")
@@ -365,7 +367,7 @@ else:
                                         df_inv_comodati.loc[df_inv_comodati["id_bene"] == bene_sel, "stato"] = "Assegnato"
                                         carica_su_sheet(df_inv_comodati, "Inventario_Comodati")
                                         
-                                        st.success(f"🚀 Verbale PDF N°{id_com} archiviato con successo con intestazione 'Ufficio Tecnico'!")
+                                        st.success(f"🚀 Verbale PDF N°{id_com} archiviato correttamente!")
                                         st.rerun()
                                     else:
                                         st.error("Impossibile caricare su Drive. Verifica le credenziali cloud.")
@@ -378,6 +380,7 @@ else:
                 if attivi.empty: st.info("Nessun comodato attivo.")
                 else:
                     for id_x, riga in attivi.iterrows():
+                        # Sostituito st.card() rimosso con st.container(border=True) nativo di Streamlit
                         with st.container(border=True):
                             c1, c2 = st.columns([3, 1])
                             with c1:
