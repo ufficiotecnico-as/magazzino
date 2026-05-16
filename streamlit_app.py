@@ -27,7 +27,7 @@ try:
 except ImportError:
     GOOGLE_DRIVE_AVAILABLE = False
 
-# Configurazione iniziale e mappatura corretta
+# Configurazione iniziale e mappatura corretta delle password
 PASSWORD_MAP = {
     "ata2026": "Personale ATA",
     "officina2026": "Officina",
@@ -35,7 +35,7 @@ PASSWORD_MAP = {
 }
 PASSWORD_ADMIN = "admin99"
 
-# Dizionario di mappatura dinamica basato sui reali nomi delle schede nel tuo Google Sheet
+# Dizionario di mappatura basato sui reali nomi delle schede nel tuo Google Sheet
 MAPPA_SCHEDE = {
     "Personale ATA": {
         "inventario": "Inventario ata",
@@ -59,7 +59,7 @@ LISTA_MAGAZZINI = ["Personale ATA", "Officina", "Tecnici Informatici"]
 st.set_page_config(page_title="Gestione Magazzini Scarpa", page_icon="🧺", layout="wide")
 
 # --- CONNESSIONE A GOOGLE SHEETS ---
-@st.cache_resource(ttl=10)
+@st.cache_resource(ttl=5)
 def connetti_google_sheets():
     if not GSPREAD_AVAILABLE:
         st.error("Errore: La libreria `gspread` non è installata.")
@@ -69,16 +69,26 @@ def connetti_google_sheets():
         return None
     try:
         creds_dict = dict(st.secrets["google_creds"])
-        if "\\n" in creds_dict["private_key"]:
+        
+        # Correzione dei caratteri di a capo nella chiave privata
+        if "private_key" in creds_dict and "\\n" in creds_dict["private_key"]:
             creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
+            
         scopes = [
             'https://www.googleapis.com/auth/spreadsheets',
             'https://www.googleapis.com/auth/drive'
         ]
+        
+        # Inizializzazione credenziali con supporto per l'universe domain
         creds = service_account.Credentials.from_service_account_info(creds_dict, scopes=scopes)
+        
+        # Gestione esplicita dell'universo dei domini di Google Cloud se presente nei Secrets
+        if "universe_domain" in creds_dict:
+            creds = creds.with_universe_domain(creds_dict["universe_domain"])
+            
         return gspread.authorize(creds).open_by_key(SPREADSHEET_ID)
     except Exception as e:
-        st.error(f"Errore di connessione a Google Sheets: {e}")
+        st.error(f"Errore critico di autenticazione: {e}")
         return None
 
 # --- FUNZIONI DI LETTURA / SCRITTURA ---
@@ -90,7 +100,6 @@ def scarica_da_sheet(nome_scheda):
             records = worksheet.get_all_records()
             return pd.DataFrame(records)
         except gspread.exceptions.WorksheetNotFound:
-            # Se la scheda non esiste, la creiamo con le intestazioni standard
             if "Inventario" in nome_scheda:
                 df_base = pd.DataFrame(columns=["magazzino", "id_articolo", "nome_articolo", "giacenza_totale"])
             elif "Richieste" in nome_scheda:
@@ -100,7 +109,7 @@ def scarica_da_sheet(nome_scheda):
             carica_su_sheet(df_base, nome_scheda)
             return df_base
         except Exception as e:
-            st.error(f"Errore lettura scheda '{nome_scheda}': {e}")
+            st.error(f"Errore di connessione a Google Sheets: {e}")
             return pd.DataFrame()
     return pd.DataFrame()
 
@@ -129,9 +138,13 @@ def carica_su_drive(file_bytes, nome_file, mime_type, nome_magazzino):
         return None
     try:
         creds_dict = dict(st.secrets["google_creds"])
-        if "\\n" in creds_dict["private_key"]:
+        if "private_key" in creds_dict and "\\n" in creds_dict["private_key"]:
             creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
+            
         creds = service_account.Credentials.from_service_account_info(creds_dict, scopes=['https://www.googleapis.com/auth/drive'])
+        if "universe_domain" in creds_dict:
+            creds = creds.with_universe_domain(creds_dict["universe_domain"])
+            
         service = build('drive', 'v3', credentials=creds)
         
         nome_sottocartella = f"DDT_{nome_magazzino.replace(' ', '_')}"
@@ -155,7 +168,7 @@ if "utente_corrente" not in st.session_state: st.session_state.utente_corrente =
 if "magazzino_selezionato" not in st.session_state: st.session_state.magazzino_selezionato = None
 if "scanned_code" not in st.session_state: st.session_state.scanned_code = ""
 
-# --- STILE CUSTON UX/UI ---
+# --- STILE CUSTOM UX/UI ---
 st.markdown("""
     <style>
         .stApp { background-color: #f1f5f9 !important; color: #0f172a !important; font-family: 'Inter', sans-serif; }
@@ -214,7 +227,6 @@ else:
         with st.container():
             target_magazzino = st.selectbox("A quale magazzino vuoi inviare la richiesta?", LISTA_MAGAZZINI)
             
-            # Scarica dinamicamente il foglio inventario specifico di quel magazzino
             scheda_inv_nome = MAPPA_SCHEDE[target_magazzino]["inventario"]
             df_inventario_spec = scarica_da_sheet(scheda_inv_nome)
             
@@ -243,13 +255,12 @@ else:
         mag_corrente = st.session_state.magazzino_selezionato
         st.markdown(f"<h1>🚚 Pannello Operativo: {mag_corrente}</h1>", unsafe_allow_html=True)
         
-        # Carichiamo le schede esatte per questo magazziniere
         scheda_inv_reale = MAPPA_SCHEDE[mag_corrente]["inventario"]
         scheda_rich_reale = MAPPA_SCHEDE[mag_corrente]["richieste"]
         
         df_inventario = scarica_da_sheet(scheda_inv_reale)
         df_richieste = scarica_da_sheet(scheda_rich_reale)
-        df_approv = scarica_da_sheet("Ordini") # Resta globale dell'admin
+        df_approv = scarica_da_sheet("Ordini")
         
         tab_carico, tab_consegne, tab_rifornisci, tab_ddt = st.tabs(["📷 SCANNER REAL-TIME", "📋 Richieste dipendenti", "🛒 Ordini Nuovi", "📸 DDT"])
         
@@ -369,11 +380,9 @@ else:
                     with st.container():
                         st.write(f"🏢 **{row['magazzino']}** richiede {row['quantita_richiesta']}x **{row['articolo']}**")
                         if st.button("Approva ed Inserisci nello Stock", key=f"ap_ad_{row['id_acquisto']}"):
-                            # Aggiorna lo stato dell'ordine
                             df_approv_admin.loc[df_approv_admin["id_acquisto"].astype(str) == str(row["id_acquisto"]), "stato"] = "Approvato"
                             carica_su_sheet(df_approv_admin, "Ordini")
                             
-                            # Carica l'inventario specifico per aggiungere il materiale sbloccato
                             sch_inv_dest = MAPPA_SCHEDE[row["magazzino"]]["inventario"]
                             df_inv_dest = scarica_da_sheet(sch_inv_dest)
                             
