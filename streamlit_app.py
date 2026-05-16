@@ -27,7 +27,7 @@ try:
 except ImportError:
     GOOGLE_DRIVE_AVAILABLE = False
 
-# Configurazione iniziale e mappatura corretta delle password
+# Mappatura delle password e dei reparti
 PASSWORD_MAP = {
     "ata2026": "Personale ATA",
     "officina2026": "Officina",
@@ -35,7 +35,6 @@ PASSWORD_MAP = {
 }
 PASSWORD_ADMIN = "admin99"
 
-# Dizionario di mappatura basato sui reali nomi delle schede nel tuo Google Sheet
 MAPPA_SCHEDE = {
     "Personale ATA": {
         "inventario": "Inventario ata",
@@ -58,37 +57,47 @@ LISTA_MAGAZZINI = ["Personale ATA", "Officina", "Tecnici Informatici"]
 
 st.set_page_config(page_title="Gestione Magazzini Scarpa", page_icon="🧺", layout="wide")
 
-# --- CONNESSIONE A GOOGLE SHEETS ---
-@st.cache_resource(ttl=5)
+# --- CONNESSIONE A GOOGLE SHEETS ULTRA-ROBUSTA ---
+@st.cache_resource(ttl=2)
 def connetti_google_sheets():
     if not GSPREAD_AVAILABLE:
         st.error("Errore: La libreria `gspread` non è installata.")
         return None
     if "google_creds" not in st.secrets:
-        st.error("Errore: Credenziali `google_creds` assenti nei Secrets di Streamlit.")
+        st.error("Errore: La sezione [google_creds] manca completamente nei Secrets di Streamlit.")
         return None
     try:
+        # Estraiamo le credenziali dai Secrets come dizionario standard
         creds_dict = dict(st.secrets["google_creds"])
         
-        # Correzione dei caratteri di a capo nella chiave privata
-        if "private_key" in creds_dict and "\\n" in creds_dict["private_key"]:
-            creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
+        # Normalizzazione avanzata della chiave privata contro errori di escape stringa
+        if "private_key" in creds_dict:
+            pk = creds_dict["private_key"]
+            # Rimuove eventuali doppie barre generate per errore dal parser TOML
+            pk = pk.replace("\\n", "\n")
+            # Rimuove spazi bianchi non necessari all'inizio e alla fine
+            creds_dict["private_key"] = pk.strip()
+        else:
+            st.error("Errore nei Secrets: Campo 'private_key' non trovato.")
+            return None
             
         scopes = [
             'https://www.googleapis.com/auth/spreadsheets',
             'https://www.googleapis.com/auth/drive'
         ]
         
-        # Inizializzazione credenziali con supporto per l'universe domain
         creds = service_account.Credentials.from_service_account_info(creds_dict, scopes=scopes)
         
-        # Gestione esplicita dell'universo dei domini di Google Cloud se presente nei Secrets
         if "universe_domain" in creds_dict:
             creds = creds.with_universe_domain(creds_dict["universe_domain"])
             
         return gspread.authorize(creds).open_by_key(SPREADSHEET_ID)
     except Exception as e:
-        st.error(f"Errore critico di autenticazione: {e}")
+        import traceback
+        errore_dettagliato = traceback.format_exc()
+        st.error(f"Errore critico di autenticazione: {str(e)}")
+        with st.expander("Vedi log tecnico dell'errore"):
+            st.code(errore_dettagliato)
         return None
 
 # --- FUNZIONI DI LETTURA / SCRITTURA ---
@@ -109,7 +118,7 @@ def scarica_da_sheet(nome_scheda):
             carica_su_sheet(df_base, nome_scheda)
             return df_base
         except Exception as e:
-            st.error(f"Errore di connessione a Google Sheets: {e}")
+            st.error(f"Errore di lettura dal foglio '{nome_scheda}': {e}")
             return pd.DataFrame()
     return pd.DataFrame()
 
@@ -138,8 +147,8 @@ def carica_su_drive(file_bytes, nome_file, mime_type, nome_magazzino):
         return None
     try:
         creds_dict = dict(st.secrets["google_creds"])
-        if "private_key" in creds_dict and "\\n" in creds_dict["private_key"]:
-            creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
+        if "private_key" in creds_dict:
+            creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n").strip()
             
         creds = service_account.Credentials.from_service_account_info(creds_dict, scopes=['https://www.googleapis.com/auth/drive'])
         if "universe_domain" in creds_dict:
@@ -162,13 +171,13 @@ def carica_su_drive(file_bytes, nome_file, mime_type, nome_magazzino):
         st.error(f"Errore nell'invio del file a Drive: {e}")
         return None
 
-# Inizializzazione variabili globali session_state
+# Stato sessione
 if "ruolo_utente" not in st.session_state: st.session_state.ruolo_utente = None
 if "utente_corrente" not in st.session_state: st.session_state.utente_corrente = ""
 if "magazzino_selezionato" not in st.session_state: st.session_state.magazzino_selezionato = None
 if "scanned_code" not in st.session_state: st.session_state.scanned_code = ""
 
-# --- STILE CUSTOM UX/UI ---
+# --- INTERFACCIA GRAFICA ---
 st.markdown("""
     <style>
         .stApp { background-color: #f1f5f9 !important; color: #0f172a !important; font-family: 'Inter', sans-serif; }
@@ -182,7 +191,6 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- INTERFACCIA LOGIN ---
 if st.session_state.ruolo_utente is None:
     st.image(URL_LOGO, width="stretch")
     st.markdown("<h1>Gestione Magazzini Centralizzata</h1>", unsafe_allow_html=True)
@@ -248,7 +256,7 @@ else:
                 
                 df_richieste_spec = pd.concat([df_richieste_spec, nuva_r], ignore_index=True)
                 carica_su_sheet(df_richieste_spec, scheda_rich_nome)
-                st.success(f"✔️ Richiesta salvata nella scheda '{scheda_rich_nome}' di Google Fogli!")
+                st.success(f"✔️ Richiesta ordinata e inviata correttamente!")
 
     # --- AREA MAGAZZINIERE ---
     elif st.session_state.ruolo_utente == "magazziniere":
@@ -344,7 +352,7 @@ else:
                 nuovo_o = pd.DataFrame([{"id_acquisto": nuovo_id_a, "magazzino": mag_corrente, "articolo": mat_urgente, "quantita_richiesta": int(qta_urgente), "stato": "In attesa", "data_richiesta": datetime.now().strftime("%d/%m/%Y %H:%M")}])
                 df_approv = pd.concat([df_approv, nuovo_o], ignore_index=True)
                 carica_su_sheet(df_approv, "Ordini")
-                st.success("✔️ Richiesta d'acquisto salvata nella scheda 'Ordini'!")
+                st.success("✔️ Richiesta d'acquisto salvata!")
 
         with tab_ddt:
             file_ddt = st.file_uploader("Carica scansione DDT", type=["png", "jpg", "jpeg", "pdf"])
