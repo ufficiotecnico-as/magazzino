@@ -162,24 +162,25 @@ else:
         tab_carico, tab_consegne, tab_rifornisci, tab_ddt = st.tabs(["📷 SCANNER REAL-TIME", "📋 Richieste", "🛒 Ordini", "📸 DDT"])
         
         with tab_carico:
-            st.markdown("### 🎯 Inquadra il Codice a Barre Lineare")
+            st.markdown("### 🎯 Inquadra il Codice a Barre")
             moltiplicatore_qta = st.number_input("Pezzi da aggiungere a ogni scansione:", min_value=1, value=1, step=1)
             
-            codice_url = st.query_params.get("b_code", "")
+            # Campo di testo nativo di Streamlit usato come ricevitore sicuro del dato letto da JS
+            codice_rilevato = st.text_input("Codice letto dall'obiettivo (o inserito manualmente):", key="codice_magazzino_input")
             
-            # LETTORE CORRETTO E RIFINITO PER LINEARI DI TIPO EAN/CODE
+            # Nuovo modulo di scansione accoppiato in modo sicuro tramite messaggistica DOM interna
             scanner_javascript_html = """
             <div style="background: #ffffff; padding: 12px; border-radius: 12px; border: 2px dashed #475569; text-align: center;">
                 <div id="camera-frame" style="width: 100%; max-width: 480px; margin: 0 auto; border-radius: 8px; overflow: hidden; background: #000;"></div>
-                <p id="scanner-output" style="font-family: system-ui, sans-serif; color: #1e293b; font-weight: 800; margin-top: 12px; font-size: 1.1rem; background: #e2e8f0; padding: 8px; border-radius: 6px;">📷 Avvicina o allontana lentamente per mettere a fuoco</p>
+                <p id="scanner-output" style="font-family: system-ui, sans-serif; color: #1e293b; font-weight: 800; margin-top: 12px; font-size: 1.1rem; background: #e2e8f0; padding: 8px; border-radius: 6px;">📸 Fotocamera Pronta - Mantieni fermo il codice</p>
             </div>
             
             <script src="https://unpkg.com/html5-qrcode"></script>
             <script>
                 let qrboxFunction = function(viewfinderWidth, viewfinderHeight) {
-                    let minEdgePercentage = 0.80; 
+                    let minEdgePercentage = 0.85; 
                     let boxWidth = Math.floor(viewfinderWidth * minEdgePercentage);
-                    let boxHeight = Math.floor(boxWidth / 3.2); 
+                    let boxHeight = Math.floor(boxWidth / 3.0); 
                     return { width: boxWidth, height: boxHeight };
                 }
 
@@ -187,9 +188,7 @@ else:
                 const config = { 
                     fps: 25, 
                     qrbox: qrboxFunction,
-                    experimentalFeatures: {
-                        useBarCodeDetectorIfSupported: true 
-                    },
+                    experimentalFeatures: { useBarCodeDetectorIfSupported: true },
                     formatsToSupport: [ 
                         Html5QrcodeSupportedFormats.EAN_13, 
                         Html5QrcodeSupportedFormats.EAN_8, 
@@ -199,38 +198,41 @@ else:
                 };
                 
                 function onScanSuccess(decodedText, decodedResult) {
-                    document.getElementById("scanner-output").innerText = "🎯 CODICE ACQUISITO: " + decodedText;
+                    // Attiva la vibrazione fisica del telefono
                     if (navigator.vibrate) navigator.vibrate(200);
+                    document.getElementById("scanner-output").innerText = "🎯 LETTO: " + decodedText;
                     
-                    setTimeout(() => {
-                        const currentUrl = new URL(window.parent.location.href);
-                        currentUrl.searchParams.set("b_code", decodedText);
-                        window.parent.location.href = currentUrl.toString();
-                    }, 150);
+                    // Trova il campo di input di Streamlit all'interno della pagina e vi scrive dentro bypassando le restrizioni di sicurezza iframe
+                    const inputs = window.parent.document.querySelectorAll('input[type="text"]');
+                    for (let input of inputs) {
+                        if (input.parentElement.parentElement.innerText.includes("Codice letto dall'obiettivo")) {
+                            input.value = decodedText;
+                            input.dispatchEvent(new Event('input', { bubbles: true }));
+                            input.dispatchEvent(new Event('change', { bubbles: true }));
+                            break;
+                        }
+                    }
                 }
 
                 Html5Qrcode.getCameras().then(devices => {
                     if (devices && devices.length > 0) {
                         html5QrcodeScanner.start({ facingMode: "environment" }, config, onScanSuccess)
                         .catch(err => {
-                            document.getElementById("scanner-output").innerText = "⚠️ Errore fotocamera.";
+                            document.getElementById("scanner-output").innerText = "⚠️ Errore di avvio video.";
                         });
                     }
                 }).catch(err => {
-                    document.getElementById("scanner-output").innerText = "Dispositivo non pronto.";
+                    document.getElementById("scanner-output").innerText = "In attesa delle periferiche video...";
                 });
             </script>
             """
             
             components.html(scanner_javascript_html, height=360, scrolling=False)
             
-            manual_input = st.text_input("In alternativa inserisci il codice manualmente o con pistola laser:", value="", key="backup_manual_field")
-            
-            codice_finale = manual_input.strip() if manual_input.strip() else codice_url
-            
-            if codice_finale:
-                st.markdown(f"🔍 **Elaborazione codice:** `{codice_finale}`")
-                filtro_art = (df_inventario["id_articolo"] == codice_finale) & (df_inventario["magazzino"] == mag_corrente)
+            if codice_rilevato:
+                codice_pulito = codice_rilevato.strip()
+                st.markdown(f"🔍 **Elaborazione codice rilevato:** `{codice_pulito}`")
+                filtro_art = (df_inventario["id_articolo"] == codice_pulito) & (df_inventario["magazzino"] == mag_corrente)
                 
                 if filtro_art.any():
                     st.session_state.db_inventario.loc[filtro_art, "giacenza_totale"] += moltiplicatore_qta
@@ -238,26 +240,25 @@ else:
                     nuova_giac = st.session_state.db_inventario.loc[filtro_art, "giacenza_totale"].values[0]
                     
                     st.success(f"✔️ INCREMENTATO: **{nome_prod}** (+{moltiplicatore_qta}). Nuova quantità: **{nuova_giac}**")
-                    st.query_params.clear()
-                    st.session_state.backup_manual_field = ""
-                    if st.button("🔄 Prosegui con la prossima scansione"):
+                    
+                    if st.button("🔄 Conferma e Passa al Prossimo Oggetto"):
+                        st.session_state.codice_magazzino_input = ""
                         st.rerun()
                 else:
-                    st.warning(f"🆕 Il codice `{codice_finale}` non esiste a magazzino. Censiscilo qui sotto:")
+                    st.warning(f"🆕 Il codice `{codice_pulito}` non è presente in questo magazzino. Registralo ora:")
                     with st.form("nuovo_censimento_veloce", clear_on_submit=True):
-                        nome_nuovo_prodotto = st.text_input("Specificare il nome del Prodotto:")
+                        nome_nuovo_prodotto = st.text_input("Nome del Prodotto:")
                         if st.form_submit_button("Registra Articolo nel Database"):
                             if nome_nuovo_prodotto.strip():
                                 nuovo_p = pd.DataFrame([{
                                     "magazzino": mag_corrente, 
-                                    "id_articolo": codice_finale, 
+                                    "id_articolo": codice_pulito, 
                                     "nome_articolo": nome_nuovo_prodotto.strip(), 
                                     "giacenza_totale": int(moltiplicatore_qta)
                                 }])
                                 st.session_state.db_inventario = pd.concat([df_inventario, nuovo_p], ignore_index=True)
                                 st.success(f"✔️ `{nome_nuovo_prodotto}` mappato con successo!")
-                                st.query_params.clear()
-                                st.session_state.backup_manual_field = ""
+                                st.session_state.codice_magazzino_input = ""
                                 st.rerun()
 
             st.write("---")
