@@ -125,8 +125,8 @@ def carica_su_sheet(df, nome_scheda):
         worksheet.update(valori)
     except Exception: pass
 
-# --- GENERAZIONE PDF CON FIRMA INTEGRATA ---
-def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione, stringa_firma_base64=None):
+# --- GENERAZIONE PDF CON FIRMA INTEGRATA E DINAMICA ---
+def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione, firma_utente_b64=None, utente_loggato="Ufficio Tecnico"):
     if not FPDF_AVAILABLE:
         return b"Errore libreria PDF"
     
@@ -165,26 +165,40 @@ def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione, 
     
     # Blocco Firme
     pdf.set_font("Arial", "B", 11)
+    # Calcolo dinamico dell'amministrazione basato sull'utente loggato
+    firma_admin_testo = "Ufficio Tecnico" if utente_loggato == "admin" else utente_loggato
+    
+    y_posizione_firme = pdf.get_y()
     pdf.cell(95, 8, "Per l'Amministrazione: ", align="L")
     pdf.cell(95, 8, "Firma del Richiedente: ", align="L", ln=True)
     
-    # Se è presente l'immagine della firma dal tablet, la incolliamo nel PDF
-    if stringa_firma_base64 and "," in stringa_firma_base64:
+    pdf.set_font("Arial", "I", 10)
+    pdf.cell(95, 8, f"F.to {firma_admin_testo}", align="L")
+    
+    # Se la firma dell'utente è presente, viene decodificata e inserita nel PDF
+    if firma_utente_b64 and len(firma_utente_b64) > 30:
         try:
-            dati_purificati = stringa_firma_base64.split(",")[1]
-            immagine_bytes = base64.b64decode(dati_purificati)
+            if "," in firma_utente_b64:
+                firma_utente_b64 = firma_utente_b64.split(",")[1]
+            immagine_bytes = base64.b64decode(firma_utente_b64)
             img = Image.open(io.BytesIO(immagine_bytes))
-            # Salvataggio temporaneo in memoria per FPDF
+            
+            # Converte in RGB se ha canale alfa per compatibilità FPDF
+            if img.mode in ('RGBA', 'LA'):
+                background = Image.new(mode='RGB', size=img.size, color=(255, 255, 255))
+                background.paste(img, box=None, mask=img.split()[3])
+                img = background
+                
             img_buffer = io.BytesIO()
-            img.save(img_buffer, format="PNG")
+            img.save(img_buffer, format="JPEG")
             img_buffer.seek(0)
             
-            # Posizioniamo l'immagine della firma sotto la scritta "Firma del Richiedente"
-            pdf.image(img_buffer, x=115, y=pdf.get_y() + 2, w=50, h=15)
-        except Exception:
-            pdf.cell(95, 8, "", align="L")
-            pdf.set_font("Arial", "I", 9)
-            pdf.cell(95, 8, "[Firmato Elettronicamente su Tablet]", align="L", ln=True)
+            # Posiziona l'immagine della firma sotto la dicitura corretta
+            pdf.image(img_buffer, x=115, y=y_posizione_firme + 8, w=60, h=18)
+        except Exception as e:
+            pdf.cell(95, 8, "[Firma Acquisita Digitalmente]", align="L", ln=True)
+    else:
+        pdf.cell(95, 8, "_______________________", align="L", ln=True)
             
     return pdf.output()
 
@@ -201,22 +215,16 @@ def carica_su_drive_unico(file_bytes, nome_file, mime_type, nome_cartella_dest):
         creds = service_account.Credentials.from_service_account_info(creds_info, scopes=['https://www.googleapis.com/auth/drive'])
         service = build('drive', 'v3', credentials=creds)
         
-        id_cartella = st.session_state.get(f"id_cartella_{nome_cartella_dest.lower()}")
+        # Cerchiamo se esiste già globalmente dentro la cartella principale per evitare duplicati
+        query = f"name='{nome_cartella_dest}' and '{ID_CARTELLA_DRIVE_PRINCIPALE}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false"
+        risultato = service.files().list(q=query, spaces='drive', supportsAllDrives=True, includeItemsFromAllDrives=True).execute()
+        files = risultato.get('files', [])
         
-        if not id_cartella:
-            # Cerchiamo se esiste già globalmente dentro la cartella principale per evitare duplicati
-            query = f"name='{nome_cartella_dest}' and '{ID_CARTELLA_DRIVE_PRINCIPALE}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false"
-            risultato = service.files().list(q=query, spaces='drive', supportsAllDrives=True, includeItemsFromAllDrives=True).execute()
-            files = risultato.get('files', [])
-            
-            if files:
-                id_cartella = files[0]['id']
-            else:
-                # Se non esiste affatto, allora la creiamo una volta sola
-                meta_cartella = {'name': nome_cartella_dest, 'mimeType': 'application/vnd.google-apps.folder', 'parents': [ID_CARTELLA_DRIVE_PRINCIPALE]}
-                id_cartella = service.files().create(body=meta_cartella, fields='id', supportsAllDrives=True).execute().get('id')
-            
-            st.session_state[f"id_cartella_{nome_cartella_dest.lower()}"] = id_cartella
+        if files:
+            id_cartella = files[0]['id']
+        else:
+            meta_cartella = {'name': nome_cartella_dest, 'mimeType': 'application/vnd.google-apps.folder', 'parents': [ID_CARTELLA_DRIVE_PRINCIPALE]}
+            id_cartella = service.files().create(body=meta_cartella, fields='id', supportsAllDrives=True).execute().get('id')
             
         meta_file = {'name': nome_file, 'parents': [id_cartella]}
         media = MediaIoBaseUpload(io.BytesIO(file_bytes), mimetype=mime_type, resumable=True)
@@ -251,15 +259,17 @@ if st.session_state.ruolo_utente is None:
                     if pwd in PASSWORD_MAP:
                         st.session_state.ruolo_utente = "magazziniere"
                         st.session_state.magazzino_selezionato = PASSWORD_MAP[pwd]
+                        st.session_state.utente_corrente = PASSWORD_MAP[pwd]
                         st.rerun()
                     elif pwd == PASSWORD_ADMIN:
                         st.session_state.ruolo_utente = "admin"
+                        st.session_state.utente_corrente = "admin"
                         st.rerun()
                     else: st.error("Codice non valido.")
 else:
     # Top bar
     col_t, col_b_logout = st.columns([4, 1])
-    with col_t: st.markdown(f"Accesso: **{st.session_state.utente_corrente if st.session_state.utente_corrente else st.session_state.ruolo_utente.upper()}**")
+    with col_t: st.markdown(f"Accesso: **{st.session_state.utente_corrente.upper()}**")
     with col_b_logout:
         if st.button("🚪 Cambia Profilo", use_container_width=True):
             st.session_state.ruolo_utente = None
@@ -297,7 +307,7 @@ else:
                 st.dataframe(df_inv_comodati, use_container_width=True, hide_index=True)
                 
             with sub_nuovo:
-                st.markdown("### Nuovo Accordo di Comodato con Firma")
+                st.markdown("### Nuovo Accordo di Comodato con Firma Digitale")
                 if df_inv_comodati.empty or not (df_inv_comodati["stato"] == "Disponibile").any():
                     st.warning("Nessun bene disponibile al momento.")
                 else:
@@ -311,15 +321,16 @@ else:
                         
                     st.markdown("<div style='background-color:#fff3cd; padding:12px; border-radius:8px; border:1px solid #ffeeba; font-size:13px;'><b>Clausola di Custodia:</b> Il firmatario prende in carico l'oggetto integro e funzionante e si impegna a riconsegnarlo integro alla scadenza richiesta.</div>", unsafe_allow_html=True)
                     
-                    # --- CANVAS INTERATTIVO COMPATIBILE AL 100% CON TABLET ---
+                    # --- CANVAS CON PASSAGGIO DATI SICURO E DIRETTO VIA INPUT ---
                     st.markdown("#### 🖊️ Firma sul Tablet qui sotto:")
                     import streamlit.components.v1 as components
                     
+                    # Il JavaScript ora scrive direttamente il Base64 in un elemento di input nascosto visibile a Streamlit
                     componente_firma_html = """
                     <div style="width:100%; max-width:550px;">
                         <canvas id="sig-canvas" width="520" height="150" style="border: 2px dashed #8b1e1e; border-radius: 8px; background-color: #ffffff; cursor: crosshair; touch-action: none;"></canvas>
                         <br>
-                        <button type="button" onclick="clearCanvas()" style="background:#64748b; color:white; border:none; padding:6px 12px; border-radius:4px; margin-top:5px; font-size:12px; font-weight:bold; cursor:pointer;">🧹 Cancella e rifai</button>
+                        <button type="button" onclick="clearCanvas()" style="background:#64748b; color:white; border:none; padding:6px 12px; border-radius:4px; margin-top:5px; font-size:12px; font-weight:bold; cursor:pointer;">⚠️ CANCELLA E RIFÀI</button>
                     </div>
                     <script>
                         var canvas = document.getElementById("sig-canvas");
@@ -327,56 +338,63 @@ else:
                         ctx.strokeStyle = "#000000"; ctx.lineWidth = 3;
                         var drawing = false;
                         
-                        function inviaFirmaAStreamlit() {
+                        function trasmettiDati() {
                             var dataUrl = canvas.toDataURL("image/png");
-                            window.parent.postMessage({type: "firma_disegnata", data: dataUrl}, "*");
+                            // Invia l'immagine al campo di testo di Streamlit
+                            window.parent.postMessage({
+                                isStreamlitMessage: true,
+                                type: "streamlit:setComponentValue",
+                                value: dataUrl
+                            }, "*");
                         }
 
                         canvas.addEventListener("mousedown", function(e) { drawing = true; ctx.beginPath(); ctx.moveTo(e.offsetX, e.offsetY); });
-                        canvas.addEventListener("mousemove", function(e) { if (drawing) { ctx.lineTo(e.offsetX, e.offsetY); ctx.stroke(); inviaFirmaAStreamlit(); } });
-                        canvas.addEventListener("mouseup", function() { drawing = false; });
+                        canvas.addEventListener("mousemove", function(e) { if (drawing) { ctx.lineTo(e.offsetX, e.offsetY); ctx.stroke(); } });
+                        canvas.addEventListener("mouseup", function() { drawing = false; trasmettiDati(); });
                         
                         canvas.addEventListener("touchstart", function(e) { drawing = true; var t = e.touches[0]; var b = canvas.getBoundingClientRect(); ctx.beginPath(); ctx.moveTo(t.clientX - b.left, t.clientY - b.top); });
-                        canvas.addEventListener("touchmove", function(e) { if (drawing) { var t = e.touches[0]; var b = canvas.getBoundingClientRect(); ctx.lineTo(t.clientX - b.left, t.clientY - b.top); ctx.stroke(); inviaFirmaAStreamlit(); } e.preventDefault(); });
-                        canvas.addEventListener("touchend", function() { drawing = false; });
+                        canvas.addEventListener("touchmove", function(e) { if (drawing) { var t = e.touches[0]; var b = canvas.getBoundingClientRect(); ctx.lineTo(t.clientX - b.left, t.clientY - b.top); ctx.stroke(); } e.preventDefault(); });
+                        canvas.addEventListener("touchend", function() { drawing = false; trasmettiDati(); });
                         
-                        function clearCanvas() { ctx.clearRect(0, 0, canvas.width, canvas.height); window.parent.postMessage({type: "firma_disegnata", data: ""}, "*"); }
+                        function clearCanvas() { 
+                            ctx.clearRect(0, 0, canvas.width, canvas.height); 
+                            window.parent.postMessage({ isStreamlitMessage: true, type: "streamlit:setComponentValue", value: "" }, "*");
+                        }
                     </script>
                     """
                     
-                    # Gestore del messaggio inviato dal Javascript Canvas a Streamlit
-                    from html import escape
-                    if "firma_b64" not in st.session_state: st.session_state.firma_b64 = ""
+                    # Creiamo un'area in cui memorizzare temporaneamente lo stato della stringa della firma
+                    stringa_firma_input = st.text_input("Codice Identificativo Firma Elettronica (Non Modificare)", key="firma_salvata_b64", help="Questo campo si autocompila quando firmi sul tablet sopra.")
                     
-                    # Visualizzazione del blocco Canvas
+                    # Esecuzione del Canvas iframe
                     components.html(componente_firma_html, height=200)
-                    
-                    # Input nascosto per fare ponte con il Javascript della firma
-                    firma_catturata = st.text_input("Codice Controllo Firma (Generato dal Tablet automaticamente)", key="ponte_firma", help="Non modificare questo campo, si compila disegnando sopra.")
                     
                     if st.button("✍️ Approva e Salva PDF su Google Drive", type="primary", use_container_width=True):
                         if nom_sog.strip():
-                            id_com = int(df_reg_comodati["id_comodato"].astype(float).max()) + 1 if not df_reg_comodati.empty else 1001
-                            data_ora = datetime.now().strftime("%d/%m/%Y %H:%M")
-                            
-                            # Creiamo il PDF REALE passando la firma catturata
-                            pdf_output_bytes = genera_pdf_comodato(id_com, nom_sog.strip(), tipo_sog, bene_sel, data_ora, "CONSEGNA", firma_catturata)
-                            
-                            # Carichiamo il file .PDF effettivo su Drive evitando duplicazioni di cartelle
-                            nome_file_pdf = f"Verbale_Consegna_{id_com}_{nom_sog.replace(' ', '_')}.pdf"
-                            carica_su_drive_unico(pdf_output_bytes, nome_file_pdf, "application/pdf", "Comodati_Consegne")
-                            
-                            # Registrazione Dati su Foglio Excel Cloud
-                            nuova_r = pd.DataFrame([{"id_comodato": id_com, "tipo_soggetto": tipo_sog, "nominativo": nom_sog.strip(), "id_bene": bene_sel, "data_consegna": data_ora, "stato_comodato": "In Corso"}])
-                            df_reg_comodati = pd.concat([df_reg_comodati, nuova_r], ignore_index=True)
-                            carica_su_sheet(df_reg_comodati, "Registro_Comodati")
-                            
-                            # Cambiamo lo stato del bene su Assegnato
-                            df_inv_comodati.loc[df_inv_comodati["id_bene"] == bene_sel, "stato"] = "Assegnato"
-                            carica_su_sheet(df_inv_comodati, "Inventario_Comodati")
-                            
-                            st.success(f"🚀 Contratto di Consegna PDF N°{id_com} archiviato correttamente in Drive!")
-                            st.rerun()
+                            if not stringa_firma_input:
+                                st.error("⚠️ Attenzione: È necessario apporre la firma sul tablet prima di salvare il PDF.")
+                            else:
+                                id_com = int(df_reg_comodati["id_comodato"].astype(float).max()) + 1 if not df_reg_comodati.empty else 1001
+                                data_ora = datetime.now().strftime("%d/%m/%Y %H:%M")
+                                
+                                # Creiamo il PDF REALE passando la firma catturata e l'utente corrente ("admin")
+                                pdf_output_bytes = genera_pdf_comodato(id_com, nom_sog.strip(), tipo_sog, bene_sel, data_ora, "CONSEGNA", stringa_firma_input, st.session_state.utente_corrente)
+                                
+                                # Carichiamo il file .PDF effettivo su Drive evitando duplicazioni di cartelle
+                                nome_file_pdf = f"Verbale_Consegna_{id_com}_{nom_sog.replace(' ', '_')}.pdf"
+                                carica_su_drive_unico(pdf_output_bytes, nome_file_pdf, "application/pdf", "Comodati_Consegne")
+                                
+                                # Registrazione Dati su Foglio Excel Cloud
+                                nuova_r = pd.DataFrame([{"id_comodato": id_com, "tipo_soggetto": tipo_sog, "nominativo": nom_sog.strip(), "id_bene": bene_sel, "data_consegna": data_ora, "stato_comodato": "In Corso"}])
+                                df_reg_comodati = pd.concat([df_reg_comodati, nuova_r], ignore_index=True)
+                                carica_su_sheet(df_reg_comodati, "Registro_Comodati")
+                                
+                                # Cambiamo lo stato del bene su Assegnato
+                                df_inv_comodati.loc[df_inv_comodati["id_bene"] == bene_sel, "stato"] = "Assegnato"
+                                carica_su_sheet(df_inv_comodati, "Inventario_Comodati")
+                                
+                                st.success(f"🚀 Contratto di Consegna PDF N°{id_com} archiviato e registrato correttamente con firme visibili!")
+                                st.rerun()
                         else:
                             st.error("Inserisci il nome completo prima di salvare.")
                             
@@ -397,7 +415,7 @@ else:
                                     data_rientro = datetime.now().strftime("%d/%m/%Y %H:%M")
                                     
                                     # Genera PDF di Riconsegna scarico responsabilità
-                                    pdf_rientro_bytes = genera_pdf_comodato(riga['id_comodato'], riga['nominativo'], riga['tipo_soggetto'], riga['id_bene'], data_rientro, "RICONSEGNA")
+                                    pdf_rientro_bytes = genera_pdf_comodato(riga['id_comodato'], riga['nominativo'], riga['tipo_soggetto'], riga['id_bene'], data_rientro, "RICONSEGNA", utente_loggato=st.session_state.utente_corrente)
                                     nome_file_rientro = f"Ricevuta_Riconsegna_{riga['id_comodato']}.pdf"
                                     carica_su_drive_unico(pdf_rientro_bytes, nome_file_rientro, "application/pdf", "Comodati_Riconsegne")
                                     
@@ -408,7 +426,7 @@ else:
                                     df_inv_comodati.loc[df_inv_comodati["id_bene"] == riga["id_bene"], "stato"] = "Disponibile"
                                     carica_su_sheet(df_inv_comodati, "Inventario_Comodati")
                                     
-                                    st.success("Bene rientrato in inventario e PDF firmato generato!")
+                                    st.success("Bene rientrato in inventario e Ricevuta di Riconsegna PDF generata!")
                                     st.rerun()
 
     # --- SOTTO AREA RICHIESTE COLLABORATORE TRADIZIONALE ---
