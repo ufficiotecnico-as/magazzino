@@ -9,17 +9,20 @@ PASSWORD_MAGAZZINIERE = "magazzino2026"
 PASSWORD_ADMIN = "admin99"
 URL_LOGO = "https://cspace.spaggiari.eu//pub/TVII0004/TVII0004-intestazione-nuova-senzaloghi.png?_t=1712923868"
 
-# Configurazione della pagina con layout centrato e titolo nel browser
-st.set_page_config(page_title="Gestione Magazzino Scarpa", page_icon="📦", layout="centered")
+# Configurazione della pagina con l'icona a forma di CESTINO (Basket) anche per il browser
+st.set_page_config(page_title="Gestione Magazzino Scarpa", page_icon="🧺", layout="centered")
 
-# --- ABBELLIMENTO INTERFACCIA TRAMITE CSS INIETTATO ---
+# --- META TAG PER RENDERLO UNA PWA SCARICABILE + CSS ---
 st.markdown("""
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="Magazzino Scarpa">
+    <link rel="apple-touch-icon" href="https://fonts.gstatic.com/s/i/short-term/release/materialsymbolsoutlined/shopping_basket/default/48px.svg">
+
     <style>
-        /* Sfondo generale più morbido */
         .stApp {
             background-color: #f8f9fa;
         }
-        /* Stile per i titoli */
         h1 {
             color: #1e3a8a !important;
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -30,7 +33,6 @@ st.markdown("""
         h2, h3 {
             color: #2563eb !important;
         }
-        /* Personalizzazione dei bottoni principali */
         div.stButton > button:first-child {
             background-color: #2563eb;
             color: white;
@@ -42,11 +44,9 @@ st.markdown("""
         }
         div.stButton > button:first-child:hover {
             background-color: #1d4ed8;
-            border: none;
             color: white;
             transform: translateY(-1px);
         }
-        /* Card arrotondate per i moduli e le richieste */
         [data-testid="stContainer"] {
             background-color: white;
             border: 1px solid #e5e7eb !important;
@@ -77,12 +77,9 @@ if "utente_corrente" not in st.session_state:
 
 # --- SCHERMATA DI LOGIN ---
 if st.session_state.ruolo_utente is None:
-    # Inserimento del Logo aziendale centrato
     st.image(URL_LOGO, use_container_width=True)
-    
     st.title("Gestione Magazzino Scarpa")
     
-    # Card per il form di accesso
     with st.container():
         st.markdown("<h3 style='text-align: center; margin-top:0;'>🔑 Identificazione Utente</h3>", unsafe_allow_html=True)
         scelta_accesso = st.radio("Seleziona il tuo profilo:", ["Sono un Collaboratore (Richiesta materiale)", "Sono il Magazziniere / Admin"], label_visibility="collapsed")
@@ -112,7 +109,6 @@ if st.session_state.ruolo_utente is None:
 
 # --- INTERFACCE UTENTE LOGGATO ---
 else:
-    # Mostra sempre il logo in alto anche nelle pagine interne per continuità grafica
     st.image(URL_LOGO, use_container_width=True)
     
     st.sidebar.markdown(f"<h3 style='text-align:center;'>📦 Area {st.session_state.ruolo_utente.upper()}</h3>", unsafe_allow_html=True)
@@ -162,7 +158,7 @@ else:
     elif st.session_state.ruolo_utente == "magazziniere":
         st.title("🚚 Pannello Gestione Operativa")
         
-        tab_consegne, tab_carico = st.tabs(["📋 Richieste da Consegnare (Scarico)", "➕ Registro e Carico Giacenze (Inventario)"])
+        tab_consegne, tab_carico = st.tabs(["📋 Richieste da Consegnare", "➕ Registro e Carico Giacenze"])
         
         with tab_consegne:
             in_attesa = st.session_state.db_richieste[st.session_state.db_richieste["stato"] == "In attesa"]
@@ -217,7 +213,7 @@ else:
                     if not nuovo_id_art.strip() or not nuovo_nome_art.strip():
                         st.error("Compila tutti i campi per creare l'articolo.")
                     else:
-                        nuovo_prodotto = pd.DataFrame([{"id_articolo": nuovo_id_art, "nome_articolo": nuovo_nome_art, "giacenza_totale": int(nuovo_stock_art)}])
+                        nuovo_prodotto = pd.DataFrame([{"id_articolo": nuevo_id_art, "nome_articolo": nuovo_nome_art, "giacenza_totale": int(nuovo_stock_art)}])
                         st.session_state.db_inventario = pd.concat([st.session_state.db_inventario, nuovo_prodotto], ignore_index=True)
                         st.success(f"Articolo '{nuovo_nome_art}' inserito correttamente!")
                         st.rerun()
@@ -225,7 +221,6 @@ else:
     # --- 3. AREA ADMIN ---
     elif st.session_state.ruolo_utente == "admin":
         st.title("📊 Controllo Amministratore (Admin)")
-        
         st.subheader("📋 Giacenza di Magazzino Attuale")
         st.dataframe(st.session_state.db_inventario, use_container_width=True, hide_index=True)
         
