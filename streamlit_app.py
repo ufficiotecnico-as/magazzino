@@ -14,12 +14,14 @@ except ImportError:
     GOOGLE_LIBS_AVAILABLE = False
 
 # ==========================================
-# CONFIGURAZIONE GENERALI E ID DRIVER
+# CONFIGURAZIONE GENERALI E NUOVO ID DRIVER
 # ==========================================
 PASSWORD_MAGAZZINIERE = "magazzino2026"
 PASSWORD_ADMIN = "admin99"
 URL_LOGO = "https://cspace.spaggiari.eu//pub/TVII0004/TVII0004-intestazione-nuova-senzaloghi.png?_t=1712923868"
-ID_CARTELLA_DRIVE = "1T9KlJb4MFLvo3vK4XRmxRFK3wshPSP5m"
+
+# AGGIORNATO: ID del tuo nuovo Drive Condiviso
+ID_CARTELLA_DRIVE = "1bVTs2smvVJONs2oIAFZdDvX9pYDK9MZT"
 
 st.set_page_config(page_title="Gestione Magazzino Scarpa", page_icon="🧺", layout="wide")
 
@@ -52,8 +54,7 @@ def carica_su_drive(file_bytes, nome_file, mime_type):
         # Connessione alle API di Google Drive
         service = build('drive', 'v3', credentials=creds)
         
-        # FIX DEFINITIVO PER LA QUOTA: Forziamo l'inserimento dei metadati base 
-        # e indichiamo a Drive di allocare lo spazio direttamente sulla cartella madre proprietaria
+        # Metadati del file configurati appositamente per Drive Condivisi
         file_metadata = {
             'name': nome_file, 
             'parents': [ID_CARTELLA_DRIVE]
@@ -61,19 +62,18 @@ def carica_su_drive(file_bytes, nome_file, mime_type):
         
         media = MediaIoBaseUpload(io.BytesIO(file_bytes), mimetype=mime_type, resumable=True)
         
-        # Utilizziamo sia supportsAllDrives che ignoreDefaultVisibility per bypassare i vincoli di quota del robot
+        # supportsAllDrives=True permette l'upload diretto negli Shared Drives bypassando il blocco quota del robot
         file_caricato = service.files().create(
             body=file_metadata, 
             media_body=media, 
             fields='id',
-            supportsAllDrives=True,
-            ignoreDefaultVisibility=True
+            supportsAllDrives=True
         ).execute()
         
         return file_caricato.get('id')
     except Exception as e:
         st.error(f"❌ Errore durante l'invio a Google Drive: {e}")
-        st.info("💡 Passaggio obbligatorio: Assicurati di aver aperto la cartella su Google Drive, aver premuto su 'Condividi' e aggiunto l'email del Service Account (`scarpa-magazzino@magazzino-scarpa.iam.gserviceaccount.com`) con ruolo di 'Editor'. Senza questo passaggio, la cartella rifiuterà il file.")
+        st.info("💡 Promemoria: Assicurati di aver aggiunto l'email del Service Account (`scarpa-magazzino@magazzino-scarpa.iam.gserviceaccount.com`) come membro ('Contributore' o 'Gestore dei contenuti') di questo nuovo Drive Condiviso.")
         return None
 
 # ==========================================
@@ -278,7 +278,6 @@ else:
                     if not nuovo_id_art.strip() or not nuovo_nome_art.strip():
                         st.error("Compila tutti i campi dell'articolo.")
                     else:
-                        # Corretto il refuso 'नया_id_art' con 'nuovo_id_art'
                         nuovo_p = pd.DataFrame([{"id_articolo": nuovo_id_art.strip(), "nome_articolo": nuovo_nome_art.strip(), "giacenza_totale": int(nuovo_stock_art)}])
                         st.session_state.db_inventario = pd.concat([df_inventario, nuovo_p], ignore_index=True)
                         st.success("✔️ Nuovo articolo inserito in inventario!")
