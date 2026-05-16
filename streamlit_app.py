@@ -3,14 +3,6 @@ import pandas as pd
 from datetime import datetime
 import io
 import os
-from PIL import Image
-
-# Controllo e importazione delle librerie per i Codici a Barre
-try:
-    from pyzbar.pyzbar import decode
-    BARCODE_AVAILABLE = True
-except ImportError:
-    BARCODE_AVAILABLE = False
 
 # Controllo e importazione delle librerie ufficiali di Google
 try:
@@ -42,7 +34,7 @@ st.set_page_config(page_title="Gestione Magazzini Scarpa", page_icon="🧺", lay
 # ==========================================
 def carica_su_drive(file_bytes, nome_file, mime_type, nome_magazzino):
     if not GOOGLE_LIBS_AVAILABLE:
-        st.error("⚠️ Errore: Le librerie Google non sono installate nel sistema.")
+        st.error("⚠️ Errore: Le librerie Google non sono installate.")
         return None
     try:
         if "google_creds" in st.secrets:
@@ -57,7 +49,7 @@ def carica_su_drive(file_bytes, nome_file, mime_type, nome_magazzino):
                 'google_credentials.json', scopes=['https://www.googleapis.com/auth/drive']
             )
         else:
-            st.error("❌ Credenziali di Google non trovate nei Secrets.")
+            st.error("❌ Credenziali di Google non trovate.")
             return None
 
         service = build('drive', 'v3', credentials=creds)
@@ -78,7 +70,6 @@ def carica_su_drive(file_bytes, nome_file, mime_type, nome_magazzino):
             cartella_creata = service.files().create(body=meta_cartella, fields='id', supportsAllDrives=True).execute()
             id_cartella_destinazione = cartella_creata.get('id')
 
-        # Configurazione metadati con supporto per caricamento su cartelle condivise (Risolve l'errore quota)
         file_metadata = {
             'name': nome_file, 
             'parents': [id_cartella_destinazione]
@@ -90,11 +81,11 @@ def carica_su_drive(file_bytes, nome_file, mime_type, nome_magazzino):
         
         return file_caricato.get('id')
     except Exception as e:
-        st.error(f"❌ Errore durante l'invio a Google Drive: {e}")
+        st.error(f"❌ Errore Google Drive: {e}")
         return None
 
 # ==========================================
-# STILE UX/UI: SFONDO GHIACCIO E BLU NOTTE
+# STILE UX/UI
 # ==========================================
 st.markdown("""
     <style>
@@ -116,9 +107,9 @@ st.markdown("""
 # ==========================================
 if "db_inventario" not in st.session_state:
     st.session_state.db_inventario = pd.DataFrame([
-        {"magazzino": "Personale ATA", "id_articolo": "ATA01", "nome_articolo": "Camice lavoro", "giacenza_totale": 20},
-        {"magazzino": "Officina", "id_articolo": "OFF01", "nome_articolo": "Chiave inglese 13mm", "giacenza_totale": 15},
-        {"magazzino": "Tecnici Informatici", "id_articolo": "INF01", "nome_articolo": "Cavo Ethernet 5m", "giacenza_totale": 40}
+        {"magazzino": "Personale ATA", "id_articolo": "8001234567890", "nome_articolo": "Camice lavoro", "giacenza_totale": 20},
+        {"magazzino": "Officina", "id_articolo": "8009876543210", "nome_articolo": "Chiave inglese 13mm", "giacenza_totale": 15},
+        {"magazzino": "Tecnici Informatici", "id_articolo": "8005555555555", "nome_articolo": "Cavo Ethernet 5m", "giacenza_totale": 40}
     ])
 
 if "db_richieste" not in st.session_state:
@@ -227,10 +218,64 @@ else:
         mag_corrente = st.session_state.magazzino_selezionato
         st.markdown(f"<h1>🚚 Pannello Operativo: {mag_corrente}</h1>", unsafe_allow_html=True)
         
-        tab_consegne, tab_carico, tab_rifornisci, tab_ddt = st.tabs([
-            "📋 Richieste in Arrivo", "➕ Carico / Inventario", "🛒 Richiedi Rifornimenti a Admin", "📸 Archivia Foto DDT"
+        tab_carico, tab_consegne, tab_rifornisci, tab_ddt = st.tabs([
+            "⚡ CARICO AUTOMATICO BARCODE", "📋 Richieste in Arrivo", "🛒 Richiedi Rifornimenti a Admin", "📸 Archivia Foto DDT"
         ])
         
+        # TAB 1: CARICO AUTOMATICO CON LETTORE / PISTOLA BARCODE
+        with tab_carico:
+            st.markdown("### ⚡ Modalità Flusso Continuo Hardware")
+            st.caption("Fai clic sul campo sotto e spara con il lettore barcode. L'app registrerà l'articolo e si resetterà da sola.")
+            
+            # Parametri di input per il flusso
+            moltiplicatore_qta = st.number_input("Quantità da caricare per ogni scansione (Moltiplicatore):", min_value=1, value=1, step=1)
+            
+            # Campo principale in cui la pistola scrive e preme "Invio" automaticamente
+            barcode_input = st.text_input("🎯 SPARA IL BARCODE QUI (Focus attivo):", value="", key="barcode_laser_input")
+            
+            if barcode_input:
+                barcode_pulito = barcode_input.strip()
+                
+                # Cerca se il codice a barre esiste già nel magazzino corrente
+                filtro_codice = (df_inventario["id_articolo"] == barcode_pulito) & (df_inventario["magazzino"] == mag_corrente)
+                
+                if filtro_codice.any():
+                    # L'articolo esiste: incremento automatico immediato senza chiedere nulla
+                    st.session_state.db_inventario.loc[filtro_codice, "giacenza_totale"] += moltiplicatore_qta
+                    nome_art_colpito = df_inventario.loc[filtro_codice, "nome_articolo"].values[0]
+                    nuova_giac_colpita = st.session_state.db_inventario.loc[filtro_codice, "giacenza_totale"].values[0]
+                    st.success(f"➕ Rilevato: **{nome_art_colpito}**. Caricati {moltiplicatore_qta} pz. Nuova giacenza totale: {nuova_giac_colpita}")
+                    
+                    # Trucco Streamlit: Svuotiamo l'input per la prossima scansione immediata
+                    st.session_state.barcode_laser_input = ""
+                    st.rerun()
+                else:
+                    # L'articolo è nuovo: chiediamo al volo il nome per censirlo nel sistema
+                    st.warning(f"⚠️ Il codice barcode `{barcode_pulito}` è NUOVO per questo magazzino. Registralo adesso:")
+                    with st.form("form_nuovo_barcode"):
+                        nome_nuovo_censito = st.text_input("Nome dell'articolo/materiale:")
+                        stock_iniziale = st.number_input("Giacenza iniziale da assegnare:", min_value=1, value=int(moltiplicatore_qta))
+                        
+                        if st.form_submit_button("Censisci e Salva in Inventario"):
+                            if nome_nuovo_censito.strip():
+                                nuovo_item = pd.DataFrame([{
+                                    "magazzino": mag_corrente,
+                                    "id_articolo": barcode_pulito,
+                                    "nome_articolo": nome_nuovo_censito.strip(),
+                                    "giacenza_totale": int(stock_iniziale)
+                                }])
+                                st.session_state.db_inventario = pd.concat([df_inventario, nuovo_item], ignore_index=True)
+                                st.success(f"✔️ Articolo `{nome_nuovo_censito}` inserito e mappato sul barcode `{barcode_pulito}`!")
+                                st.session_state.barcode_laser_input = ""
+                                st.rerun()
+                            else:
+                                st.error("Inserisci un nome valido.")
+
+            st.write("---")
+            st.markdown("#### 📦 Stato Attuale Giacenze del tuo Reparto")
+            df_mio_mag = st.session_state.db_inventario[st.session_state.db_inventario["magazzino"] == mag_corrente]
+            st.dataframe(df_mio_mag[["id_articolo", "nome_articolo", "giacenza_totale"]], use_container_width=True, hide_index=True)
+
         with tab_consegne:
             richieste_mie = df_richieste[(df_richieste["stato"] == "In attesa") & (df_richieste["magazzino"] == mag_corrente)]
             if richieste_mie.empty:
@@ -255,52 +300,7 @@ else:
                                     else: 
                                         st.error(f"❌ Stock insufficiente! Disponibili solo {giacenza} pezzi.")
                                 else: 
-                                    st.error("⚠️ Articolo personalizzato. Censiscilo in inventario prima di consegnarlo.")
-
-        with tab_carico:
-            articoli_miei = df_inventario[df_inventario["magazzino"] == mag_corrente]["nome_articolo"].tolist()
-            
-            with st.container():
-                st.markdown("### 🔧 Rifornisci Articolo Esistente")
-                if articoli_miei:
-                    art_da_caricare = st.selectbox("Seleziona l'articolo da aumentare:", articoli_miei)
-                    qta_da_aggiungere = st.number_input("Quantità arrivata:", min_value=1, step=1)
-                    if st.button("Esegui Rifornimento"):
-                        filtro_art = (df_inventario["nome_articolo"] == art_da_caricare) & (df_inventario["magazzino"] == mag_corrente)
-                        st.session_state.db_inventario.loc[filtro_art, "giacenza_totale"] += qta_da_aggiungere
-                        st.success("Giacenza aggiornata!")
-                        st.rerun()
-                else:
-                    st.write("Nessun articolo registrato in questo magazzino.")
-            
-            with st.container():
-                st.markdown("### 🔧 Registra Nuovo Articolo")
-                
-                codice_scansionato = ""
-                st.markdown("#### 📷 Scansiona Codice a Barre")
-                foto_barcode = st.file_uploader("Fai una foto al codice a barre o carica un'immagine", type=["png", "jpg", "jpeg"], key="barcode_uploader")
-                
-                if foto_barcode is not None and BARCODE_AVAILABLE:
-                    img = Image.open(foto_barcode)
-                    codici_rilevati = decode(img)
-                    if codici_rilevati:
-                        codice_scansionato = codici_rilevati[0].data.decode('utf-8')
-                        st.success(f"🎉 Codice rilevato con successo: **{codice_scansionato}**")
-                    else:
-                        st.warning("🔎 Immagine caricata, ma nessun codice a barre leggibile trovato. Inseriscilo manualmente qui sotto.")
-
-                nuovo_id_art = st.text_input("Codice Articolo / Barcode rilevato:", value=codice_scansionato)
-                nuovo_nome_art = st.text_input("Nome del nuovo materiale:")
-                nuovo_stock_art = st.number_input("Stock iniziale inserito:", min_value=0, step=1)
-                
-                if st.button("Salva Nuovo Articolo"):
-                    if not nuovo_id_art.strip() or not nuovo_nome_art.strip():
-                        st.error("Compila tutti i campi dell'articolo.")
-                    else:
-                        nuovo_p = pd.DataFrame([{"magazzino": mag_corrente, "id_articolo": nuovo_id_art.strip(), "nome_articolo": nuovo_nome_art.strip(), "giacenza_totale": int(nuovo_stock_art)}])
-                        st.session_state.db_inventario = pd.concat([df_inventario, nuovo_p], ignore_index=True)
-                        st.success("✔️ Articolo inserito nel tuo magazzino!")
-                        st.rerun()
+                                    st.error("⚠️ Articolo personalizzato. Censiscilo prima di consegnarlo.")
 
         with tab_rifornisci:
             st.markdown("### 🛒 Invia una richiesta di acquisto o riassortimento all'Admin")
