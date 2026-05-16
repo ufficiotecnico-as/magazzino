@@ -99,6 +99,7 @@ if "db_approvvigionamenti" not in st.session_state:
 if "ruolo_utente" not in st.session_state: st.session_state.ruolo_utente = None
 if "utente_corrente" not in st.session_state: st.session_state.utente_corrente = ""
 if "magazzino_selezionato" not in st.session_state: st.session_state.magazzino_selezionato = None
+if "scanned_code" not in st.session_state: st.session_state.scanned_code = ""
 
 # --- INTERFACCIA LOGIN ---
 if st.session_state.ruolo_utente is None:
@@ -137,6 +138,7 @@ else:
         if st.session_state.ruolo_utente == "magazziniere": st.info(f"📍 Magazzino: **{st.session_state.magazzino_selezionato}**")
         if st.button("🔒 Esci / Cambia Utente"):
             st.session_state.ruolo_utente = None
+            st.session_state.scanned_code = ""
             st.rerun()
 
     # --- AREA COLLABORATORE ---
@@ -165,103 +167,106 @@ else:
             st.markdown("### 🎯 Inquadra il Codice a Barre")
             moltiplicatore_qta = st.number_input("Pezzi da aggiungere a ogni scansione:", min_value=1, value=1, step=1)
             
-            # COMUNICAZIONE NATIVA E SICURA BIDIREZIONALE TRAMITE STREAMLIT COMPONENT API
-            scanner_javascript_html = """
-            <div style="background: #ffffff; padding: 12px; border-radius: 12px; border: 2px dashed #475569; text-align: center;">
-                <div id="camera-frame" style="width: 100%; max-width: 480px; margin: 0 auto; border-radius: 8px; overflow: hidden; background: #000;"></div>
-                <p id="scanner-output" style="font-family: system-ui, sans-serif; color: #1e293b; font-weight: 800; margin-top: 12px; font-size: 1.1rem; background: #e2e8f0; padding: 8px; border-radius: 6px;">📸 Fotocamera in funzione - Centra il codice</p>
-            </div>
-            
-            <script src="https://unpkg.com/html5-qrcode"></script>
-            <script>
-                // Invia i messaggi in modo nativo a Python usando le API interne di Streamlit
-                function sendToStreamlit(value) {
-                    const message = {
-                        isStreamlitMessage: true,
-                        type: "streamlit:setComponentValue",
-                        value: value
-                    };
-                    window.parent.postMessage(message, "*");
-                }
-
-                let qrboxFunction = function(viewfinderWidth, viewfinderHeight) {
-                    let minEdgePercentage = 0.85; 
-                    let boxWidth = Math.floor(viewfinderWidth * minEdgePercentage);
-                    let boxHeight = Math.floor(boxWidth / 3.0); 
-                    return { width: boxWidth, height: boxHeight };
-                }
-
-                const html5QrcodeScanner = new Html5Qrcode("camera-frame");
-                const config = { 
-                    fps: 25, 
-                    qrbox: qrboxFunction,
-                    experimentalFeatures: { useBarCodeDetectorIfSupported: true },
-                    formatsToSupport: [ 
-                        Html5QrcodeSupportedFormats.EAN_13, 
-                        Html5QrcodeSupportedFormats.EAN_8, 
-                        Html5QrcodeSupportedFormats.CODE_128, 
-                        Html5QrcodeSupportedFormats.CODE_39 
-                    ]
-                };
+            # 1. FUNZIONE COMPONENTE PER RICEVERE DATI DA JAVASCRIPT IN MODO SICURO
+            def barcode_receiver_component():
+                html_code = """
+                <div style="background: #ffffff; padding: 12px; border-radius: 12px; border: 2px dashed #475569; text-align: center;">
+                    <div id="camera-frame" style="width: 100%; max-width: 480px; margin: 0 auto; border-radius: 8px; overflow: hidden; background: #000;"></div>
+                    <p id="scanner-output" style="font-family: system-ui, sans-serif; color: #1e293b; font-weight: 800; margin-top: 12px; font-size: 1.1rem; background: #e2e8f0; padding: 8px; border-radius: 6px;">📸 Fotocamera attiva - Centra il codice a barre</p>
+                </div>
                 
-                function onScanSuccess(decodedText, decodedResult) {
-                    if (navigator.vibrate) navigator.vibrate(200);
-                    document.getElementById("scanner-output").innerText = "🎯 LETTO: " + decodedText;
-                    
-                    // Invia il codice direttamente a Streamlit senza ricaricare la pagina o toccare l'URL
-                    sendToStreamlit(decodedText);
-                }
-
-                Html5Qrcode.getCameras().then(devices => {
-                    if (devices && devices.length > 0) {
-                        html5QrcodeScanner.start({ facingMode: "environment" }, config, onScanSuccess)
-                        .catch(err => { document.getElementById("scanner-output").innerText = "⚠️ Errore fotocamera."; });
+                <script src="https://unpkg.com/html5-qrcode"></script>
+                <script>
+                    // Connessione formale con l'interfaccia Streamlit parent
+                    function sendBarcodeToStreamlit(code) {
+                        window.parent.postMessage({
+                            isStreamlitMessage: true,
+                            type: "streamlit:setComponentValue",
+                            value: code
+                        }, "*");
                     }
-                }).catch(err => { document.getElementById("scanner-output").innerText = "Inizializzazione fotocamera..."; });
-            </script>
-            """
-            
-            # Cattura il valore restituito in tempo reale dal blocco HTML/JS
-            codice_rilevato = components.html(scanner_javascript_html, height=360, scrolling=False)
-            
-            # Campo manuale alternativo di sicurezza sempre visibile
-            manual_input = st.text_input("Inserimento manuale alternativo (o con lettore USB/Pistola laser):", value="")
-            
-            # Calcolo del codice finale combinando fotocamera o input manuale
-            codice_finale = ""
-            if manual_input.strip():
-                codice_finale = manual_input.strip()
-            elif codice_rilevato is not None and str(codice_rilevato).strip() != "":
-                codice_finale = str(codice_rilevato).strip()
 
-            # --- ELABORAZIONE DATI RICEVUTI ---
-            if codice_finale:
-                st.markdown(f"📦 **Codice pronto per l'elaborazione:** `{codice_finale}`")
-                filtro_art = (df_inventario["id_articolo"] == codice_finale) & (df_inventario["magazzino"] == mag_corrente)
+                    let qrboxFunction = function(viewfinderWidth, viewfinderHeight) {
+                        let minEdgePercentage = 0.85; 
+                        let boxWidth = Math.floor(viewfinderWidth * minEdgePercentage);
+                        let boxHeight = Math.floor(boxWidth / 3.0); 
+                        return { width: boxWidth, height: boxHeight };
+                    }
+
+                    const html5QrcodeScanner = new Html5Qrcode("camera-frame");
+                    const config = { 
+                        fps: 25, 
+                        qrbox: qrboxFunction,
+                        experimentalFeatures: { useBarCodeDetectorIfSupported: true },
+                        formatsToSupport: [ 
+                            Html5QrcodeSupportedFormats.EAN_13, 
+                            Html5QrcodeSupportedFormats.EAN_8, 
+                            Html5QrcodeSupportedFormats.CODE_128, 
+                            Html5QrcodeSupportedFormats.CODE_39 
+                        ]
+                    };
+                    
+                    function onScanSuccess(decodedText, decodedResult) {
+                        if (navigator.vibrate) navigator.vibrate(200);
+                        document.getElementById("scanner-output").innerText = "🎯 LETTO: " + decodedText;
+                        sendBarcodeToStreamlit(decodedText);
+                    }
+
+                    Html5Qrcode.getCameras().then(devices => {
+                        if (devices && devices.length > 0) {
+                            html5QrcodeScanner.start({ facingMode: "environment" }, config, onScanSuccess)
+                            .catch(err => { document.getElementById("scanner-output").innerText = "⚠️ Errore fotocamera."; });
+                        }
+                    }).catch(err => { document.getElementById("scanner-output").innerText = "Inizializzazione periferiche..."; });
+                </script>
+                """
+                # Usiamo st.components.v1.html come un vero ricevitore di messaggi
+                return components.html(html_code, height=340, scrolling=False)
+
+            # Eseguiamo lo scanner a schermo
+            valore_da_iframe = barcode_receiver_component()
+            
+            # Se la fotocamera restituisce un testo valido tramite l'evento postMessage, lo salviamo in session_state
+            if isinstance(valore_da_iframe, str) and valore_da_iframe.strip() != "":
+                st.session_state.scanned_code = valore_da_iframe.strip()
+
+            # Campo manuale di riserva (Non stampa scritte strane se vuoto)
+            manual_input = st.text_input("Inserimento manuale alternativo (Tastiera / Lettore USB):", value="")
+            if manual_input.strip():
+                st.session_state.scanned_code = manual_input.strip()
+
+            # --- CORRETTA ELABORAZIONE DEL CODICE ---
+            if st.session_state.scanned_code:
+                codice_pulito = st.session_state.scanned_code
+                st.markdown(f"📥 **Codice pronto per il registro:** `{codice_pulito}`")
+                
+                filtro_art = (df_inventario["id_articolo"] == codice_pulito) & (df_inventario["magazzino"] == mag_corrente)
                 
                 if filtro_art.any():
                     st.session_state.db_inventario.loc[filtro_art, "giacenza_totale"] += moltiplicatore_qta
                     nome_prod = df_inventario.loc[filtro_art, "nome_articolo"].values[0]
                     nuova_giac = st.session_state.db_inventario.loc[filtro_art, "giacenza_totale"].values[0]
                     
-                    st.success(f"✔️ AGGIORNATO: **{nome_prod}** (+{moltiplicatore_qta}). Stock attuale: **{nuova_giac}**")
+                    st.success(f"✔️ AGGIORNATO CON SUCCESSO: **{nome_prod}** (+{moltiplicatore_qta}). Stock totale: **{nuova_giac}**")
                     
-                    if st.button("🔄 Cancella e passa al prossimo articolo"):
+                    if st.button("🔄 Scansiona Prossimo Oggetto"):
+                        st.session_state.scanned_code = ""
                         st.rerun()
                 else:
-                    st.warning(f"🆕 Il codice `{codice_finale}` non esiste in questo reparto. Registralo ora:")
+                    st.warning(f"🆕 Il codice `{codice_pulito}` non appartiene a questo reparto. Registralo ora:")
                     with st.form("nuovo_censimento_veloce", clear_on_submit=True):
-                        nome_nuovo_prodotto = st.text_input("Nome dell'Articolo:")
-                        if st.form_submit_button("Salva nel database"):
+                        nome_nuovo_prodotto = st.text_input("Nome dell'Articolo da aggiungere:")
+                        if st.form_submit_button("Conferma e Salva nel Database"):
                             if nome_nuovo_prodotto.strip():
                                 nuovo_p = pd.DataFrame([{
                                     "magazzino": mag_corrente, 
-                                    "id_articolo": codice_finale, 
+                                    "id_articolo": codice_pulito, 
                                     "nome_articolo": nome_nuovo_prodotto.strip(), 
                                     "giacenza_totale": int(moltiplicatore_qta)
                                 }])
                                 st.session_state.db_inventario = pd.concat([df_inventario, nuovo_p], ignore_index=True)
-                                st.success(f"✔️ `{nome_nuovo_prodotto}` aggiunto all'inventario!")
+                                st.success(f"✔️ Articolo `{nome_nuovo_prodotto}` mappato nel sistema!")
+                                st.session_state.scanned_code = ""
                                 st.rerun()
 
             st.write("---")
