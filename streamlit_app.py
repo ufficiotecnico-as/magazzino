@@ -3,7 +3,13 @@ import pandas as pd
 from datetime import datetime
 import io
 import os
-import streamlit.components.v1 as components
+
+# Importazione dello scanner barcode professionale per Streamlit
+try:
+    from streamlit_barcode_scanner import streamlit_barcode_scanner
+    BARCODE_SCANNER_AVAILABLE = True
+except ImportError:
+    BARCODE_SCANNER_AVAILABLE = False
 
 # Controllo e importazione delle librerie ufficiali di Google
 try:
@@ -142,93 +148,51 @@ else:
         tab_carico, tab_consegne, tab_rifornisci, tab_ddt = st.tabs(["📷 SCANNER REAL-TIME", "📋 Richieste", "🛒 Ordini", "📸 DDT"])
         
         with tab_carico:
-            st.markdown("### 🎯 Inquadra il Codice a Barre")
+            st.markdown("### ⚡ Modalità Carico Rapido Mobile")
             moltiplicatore_qta = st.number_input("Pezzi da aggiungere a ogni scansione:", min_value=1, value=1, step=1)
             
-            # Sistema JavaScript Avanzato: Forza i formati EAN/CODE e comunica tramite i parametri dell'URL per aggirare i blocchi mobile
-            scanner_prof_html = """
-            <div style="background: #fafafa; padding: 15px; border-radius: 16px; border: 2px dashed #cbd5e1; text-align: center;">
-                <div id="interactive-reader" style="width: 100%; max-width: 480px; margin: 0 auto; border-radius: 12px; overflow: hidden; background: #000;"></div>
-                <h2 id="scanned-result" style="font-family: sans-serif; color: #1e293b; margin-top: 15px; font-size: 1.2rem;">In attesa di scansione...</h2>
-            </div>
+            codice_rilevato = ""
             
-            <script src="https://unpkg.com/html5-qrcode"></script>
-            <script>
-                function onScanSuccess(decodedText, decodedResult) {
-                    document.getElementById("scanned-result").innerText = "🎯 RILEVATO: " + decodedText;
-                    document.getElementById("scanned-result").style.color = "#15803d";
-                    
-                    // Vibrazione del telefono per dare feedback al magazziniere
-                    if (navigator.vibrate) navigator.vibrate(200);
-                    
-                    // Invio immediato e pulito del codice a Streamlit modificando l'URL del Frame padre
-                    const url = new URL(window.parent.location.href);
-                    url.searchParams.set("barcode", decodedText);
-                    window.parent.location.href = url.toString();
-                }
+            # OPZIONE 1: Scanner Fotocamera Professionale Integrato (se installato nel requirements.txt)
+            if BARCODE_SCANNER_AVAILABLE:
+                st.markdown("#### 📸 Usa la fotocamera del telefono:")
+                risultato_scanner = streamlit_barcode_scanner()
+                if risultato_scanner:
+                    codice_rilevato = risultato_scanner.strip()
+                    st.toast(f"🎯 Codice intercettato: {codice_rilevato}")
+            else:
+                st.info("💡 Per attivare la fotocamera direttamente qui, ricordati di aggiungere `streamlit-barcode-scanner` nel file `requirements.txt` del tuo repository.")
 
-                const html5QrcodeScanner = new Html5Qrcode("interactive-reader");
-                
-                // Configurazione per massimizzare la precisione sui codici a barre lineari commerciali (EAN, Code128, Code39)
-                const config = { 
-                    fps: 20, 
-                    qrbox: { width: 320, height: 160 },
-                    formatsToSupport: [ 
-                        Html5QrcodeSupportedFormats.EAN_13, 
-                        Html5QrcodeSupportedFormats.EAN_8, 
-                        Html5QrcodeSupportedFormats.CODE_128, 
-                        Html5QrcodeSupportedFormats.CODE_39,
-                        Html5QrcodeSupportedFormats.QR_CODE 
-                    ]
-                };
-
-                Html5Qrcode.getCameras().then(devices => {
-                    if (devices && devices.length > 0) {
-                        html5QrcodeScanner.start({ facingMode: "environment" }, config, onScanSuccess)
-                        .catch(err => {
-                            document.getElementById("scanned-result").innerText = "❌ Errore fotocamera. Attiva i permessi nel browser.";
-                            document.getElementById("scanned-result").style.color = "#b91c1c";
-                        });
-                    }
-                }).catch(err => {
-                    document.getElementById("scanned-result").innerText = "Nessuna fotocamera trovata.";
-                });
-            </script>
-            """
+            # OPZIONE 2: Inserimento Continuo Diretto (Pistole laser o tastiera mobile rapida)
+            st.markdown("#### 🎯 Inserimento Continuo Manuale / Tastiera / Pistola Laser")
+            manual_input = st.text_input("Spara o scrivi il codice qui e premi INVIO sulla tastiera:", value="", key="input_rapido_barcode")
             
-            components.html(scanner_prof_html, height=420, scrolling=False)
-            
-            # Intercettazione del codice dall'URL generato da JavaScript
-            query_params = st.query_params
-            codice_rilevato = query_params.get("barcode", "")
-            
-            # Campo alternativo manuale di emergenza
-            manual_input = st.text_input("Inserimento manuale alternativo (scrivi e premi invio):", value="")
+            # Scegliamo quale input ha la priorità
             codice_da_elaborare = manual_input.strip() if manual_input.strip() else codice_rilevato
             
             if codice_da_elaborare:
-                st.markdown(f"📦 **Elaborazione codice: `{codice_da_elaborare}`**")
                 filtro_art = (df_inventario["id_articolo"] == codice_da_elaborare) & (df_inventario["magazzino"] == mag_corrente)
                 
                 if filtro_art.any():
                     st.session_state.db_inventario.loc[filtro_art, "giacenza_totale"] += moltiplicatore_qta
                     nome_prod = df_inventario.loc[filtro_art, "nome_articolo"].values[0]
                     nuova_giac = st.session_state.db_inventario.loc[filtro_art, "giacenza_totale"].values[0]
-                    st.success(f"✔️ Incrementato: **{nome_prod}** (+{moltiplicatore_qta}). Nuova giacenza: **{nuova_giac}**")
                     
-                    # Reset pulito dei parametri per preparare la prossima scansione
-                    st.query_params.clear()
-                    if st.button("Sblocca per prossimo codice"): st.rerun()
+                    st.success(f"✔️ AGGIORNATO AUTOMATICAMENTE: **{nome_prod}** (+{moltiplicatore_qta}). Nuova giacenza: **{nuova_giac}**")
+                    
+                    # Reset del campo di testo per permettere la scansione successiva immediata
+                    st.session_state.input_rapido_barcode = ""
+                    st.rerun()
                 else:
-                    st.warning("🆕 Codice non censito nel tuo magazzino. Registralo ora:")
+                    st.warning(f"🆕 Il codice `{codice_da_elaborare}` non è ancora censito nel magazzino {mag_corrente}. Registralo:")
                     with st.form("registrazione_rapida"):
-                        nome_nuovo_art = st.text_input("Nome del Prodotto:")
-                        if st.form_submit_button("Mappa Barcode e Salva"):
+                        nome_nuovo_art = st.text_input("Nome del nuovo materiale:")
+                        if st.form_submit_button("Censisci e carica quantità iniziale"):
                             if nome_nuovo_art.strip():
                                 nuovo_p = pd.DataFrame([{"magazzino": mag_corrente, "id_articolo": codice_da_elaborare, "nome_articolo": nome_nuovo_art.strip(), "giacenza_totale": int(moltiplicatore_qta)}])
                                 st.session_state.db_inventario = pd.concat([df_inventario, nuovo_p], ignore_index=True)
-                                st.success("Registrato!")
-                                st.query_params.clear()
+                                st.success(f"✔️ Articolo `{nome_nuovo_art}` registrato correttamente!")
+                                st.session_state.input_rapido_barcode = ""
                                 st.rerun()
 
             st.write("---")
