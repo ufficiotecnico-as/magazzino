@@ -8,3 +8,4 @@ google-auth
 opencv-python-headless
 fpdf2
 streamlit-drawable-canvas
+numpy
