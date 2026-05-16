@@ -4,7 +4,7 @@ from datetime import datetime
 import io
 import os
 
-# Proviamo a importare le librerie Google se presenti (evita crash se non ancora installate)
+# Controllo e importazione delle librerie ufficiali di Google
 try:
     from google.oauth2 import service_account
     from googleapiclient.discovery import build
@@ -14,7 +14,7 @@ except ImportError:
     GOOGLE_LIBS_AVAILABLE = False
 
 # ==========================================
-# CONFIGURAZIONE PASSWORD / PIN DI ACCESSO
+# CONFIGURAZIONE GENERALI E ID DRIVRE
 # ==========================================
 PASSWORD_MAGAZZINIERE = "magazzino2026"
 PASSWORD_ADMIN = "admin99"
@@ -23,48 +23,64 @@ ID_CARTELLA_DRIVE = "1T9KlJb4MFLvo3vK4XRmxRFK3wshPSP5m"
 
 st.set_page_config(page_title="Gestione Magazzino Scarpa", page_icon="🧺", layout="wide")
 
-# Funzione per connettersi a Google Drive e caricare il file
+# ==========================================
+# FUNZIONE DI CARICAMENTO SU GOOGLE DRIVE
+# ==========================================
 def carica_su_drive(file_bytes, nome_file, mime_type):
     if not GOOGLE_LIBS_AVAILABLE:
-        st.error("Librerie Google non installate nel sistema.")
+        st.error("⚠️ Errore: Le librerie Google non sono installate nel sistema. Controlla il file requirements.txt.")
         return None
     try:
-        if not os.path.exists('google_credentials.json'):
-            st.error("File 'google_credentials.json' non trovato nel server.")
+        # 1. Prova a leggere prima dai Secrets di Streamlit Cloud (Formato TOML)
+        if "google_creds" in st.secrets:
+            creds_dict = dict(st.secrets["google_creds"])
+            # Ripristina gli a capo corretti per la chiave privata se necessario
+            if "\\n" in creds_dict["private_key"]:
+                creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
+            creds = service_account.Credentials.from_service_account_info(
+                creds_dict, 
+                scopes=['https://www.googleapis.com/auth/drive']
+            )
+        # 2. Se non ci sono i Secrets, cerca il file fisico (Utile per Proxmox)
+        elif os.path.exists('google_credentials.json'):
+            creds = service_account.Credentials.from_service_account_file(
+                'google_credentials.json', 
+                scopes=['https://www.googleapis.com/auth/drive']
+            )
+        else:
+            st.error("❌ Credenziali di Google non trovate. Verifica la configurazione nei Secrets.")
             return None
-        creds = service_account.Credentials.from_service_account_file(
-            'google_credentials.json', 
-            scopes=['https://www.googleapis.com/auth/drive']
-        )
+
+        # Connessione alle API di Google Drive
         service = build('drive', 'v3', credentials=creds)
         file_metadata = {'name': nome_file, 'parents': [ID_CARTELLA_DRIVE]}
         media = MediaIoBaseUpload(io.BytesIO(file_bytes), mimetype=mime_type, resumable=True)
         file_caricato = service.files().create(body=file_metadata, media_body=media, fields='id').execute()
         return file_caricato.get('id')
     except Exception as e:
-        st.error(f"Errore caricamento su Google Drive: {e}")
+        st.error(f"❌ Errore durante l'invio a Google Drive: {e}")
         return None
 
 # ==========================================
-# NUOVO STILE: SFONDO GHIACCIO E BLU NOTTE
+# STILE UX/UI: SFONDO GHIACCIO E BLU NOTTE
 # ==========================================
 st.markdown("""
     <style>
-        /* Sfondo dell'app: Color Ghiaccio Chiaro e Luminoso */
+        /* Sfondo dell'app: Grigio Ghiaccio Pulito */
         .stApp {
             background-color: #f1f5f9 !important;
             color: #0f172a !important;
             font-family: 'Inter', sans-serif;
         }
 
-        /* Forza la centratura e la leggibilità su schermi PC */
+        /* Centratura ottimizzata per Monitor PC */
         [data-testid="stMainBlockContainer"] {
-            max-width: 1000px;
+            max-width: 1050px;
             margin: 0 auto;
             padding-top: 2rem;
         }
 
-        /* Titoli Principali: Color Blu Notte Intenso */
+        /* Titoli e Intestazioni: Blu Notte Scuro */
         h1 {
             color: #0f172a !important;
             font-family: 'Montserrat', sans-serif;
@@ -73,28 +89,28 @@ st.markdown("""
             margin-bottom: 30px !important;
         }
 
-        /* Sottotitoli sezioni */
+        /* Sottotitoli ed Etichette dei Campi */
         h2, h3, h4, label, [data-testid="stWidgetLabel"] p {
             color: #1e293b !important;
             font-weight: 700 !important;
         }
 
-        /* CARD BIANCHE: Contenitori staccati dallo sfondo per i moduli */
+        /* CARD BIANCHE: Contenitori dei Moduli */
         [data-testid="stContainer"] {
             background-color: #ffffff !important;
             border: 1px solid #e2e8f0 !important;
             border-radius: 16px !important;
-            padding: 25px !important;
+            padding: 28px !important;
             box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03) !important;
             margin-bottom: 20px;
         }
 
-        /* Personalizzazione Testi interni alle schede */
+        /* Testi interni alle schede */
         [data-testid="stContainer"] p {
             color: #334155 !important;
         }
 
-        /* BOTTONI PREMIUM: Blu Notte con scritte bianche */
+        /* BOTTONI PREMIUM: Sfumatura Blu Notte / Ardesia */
         div.stButton > button:first-child {
             background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%) !important;
             color: #ffffff !important;
@@ -118,14 +134,14 @@ st.markdown("""
             border-right: 1px solid #e2e8f0;
         }
         
-        /* Nascondi elementi di debug nativi di Streamlit */
+        /* Pulizia interfaccia */
         footer {visibility: hidden;}
         [data-testid="stHeader"] {background: transparent;}
     </style>
 """, unsafe_allow_html=True)
 
 # ==========================================
-# DATABASE IN MEMORIA (Session State)
+# INIZIALIZZAZIONE DATABASE IN MEMORIA
 # ==========================================
 if "db_inventario" not in st.session_state:
     st.session_state.db_inventario = pd.DataFrame([
@@ -142,7 +158,7 @@ if "ruolo_utente" not in st.session_state:
 if "utente_corrente" not in st.session_state:
     st.session_state.utente_corrente = ""
 
-# --- LOGIN ---
+# --- SCHERMATA LOGIN ---
 if st.session_state.ruolo_utente is None:
     st.image(URL_LOGO, use_container_width=True)
     st.markdown("<h1>Gestione Magazzino Scarpa</h1>", unsafe_allow_html=True)
@@ -158,7 +174,7 @@ if st.session_state.ruolo_utente is None:
                 nome_input = st.text_input("Inserisci il tuo Nome e Cognome:")
                 if st.button("Accedi all'area Richieste"):
                     if not nome_input.strip():
-                        st.error("⚠️ Inserisci il tuo nome.")
+                        st.error("⚠️ Inserisci il tuo nome per continuare.")
                     else:
                         st.session_state.ruolo_utente = "collaboratore"
                         st.session_state.utente_corrente = nome_input.strip()
@@ -174,9 +190,9 @@ if st.session_state.ruolo_utente is None:
                         st.session_state.ruolo_utente = "admin"
                         st.rerun()
                     else:
-                        st.error("❌ Password errata.")
+                        st.error("❌ Password errata. Riprova.")
 
-# --- INTERFACCE UTENTI ---
+# --- INTERFACCE ABILITATE ---
 else:
     st.image(URL_LOGO, use_container_width=True)
     
@@ -191,7 +207,7 @@ else:
     df_inventario = st.session_state.db_inventario
     df_richieste = st.session_state.db_richieste
 
-    # --- 1. AREA COLLABORATORE ---
+    # --- 1. SCHERMATA COLLABORATORE ---
     if st.session_state.ruolo_utente == "collaboratore":
         st.markdown(f"<h1>👋 Benvenuto, {st.session_state.utente_corrente}</h1>", unsafe_allow_html=True)
         
@@ -207,29 +223,30 @@ else:
             st.markdown("<br>", unsafe_allow_html=True)
             if st.button("Invia Ordine in Magazzino"):
                 if articolo_selezionato == "Altro..." and not articolo_finale.strip():
-                    st.error("Specifica il materiale prima di inviare.")
+                    st.error("⚠️ Specifica il nome del materiale.")
                 else:
                     nuovo_id = int(df_richieste["id_richiesta"].max()) + 1 if not df_richieste.empty else 1
                     nuova_r = pd.DataFrame([{"id_richiesta": nuovo_id, "collaboratore": st.session_state.utente_corrente, "articolo": articolo_finale, "quantita": int(qta), "stato": "In attesa", "data_richiesta": datetime.now().strftime("%d/%m/%Y %H:%M"), "data_consegna": ""}])
                     st.session_state.db_richieste = pd.concat([df_richieste, nuova_r], ignore_index=True)
-                    st.success("✔️ Richiesta inoltrata al magazziniere!")
+                    st.success("✔️ Richiesta inoltrata al magazziniere con successo!")
 
-    # --- 2. AREA MAGAZZINIERE ---
+    # --- 2. SCHERMATA MAGAZZINIERE ---
     elif st.session_state.ruolo_utente == "magazziniere":
         st.markdown("<h1>🚚 Pannello Operativo Magazzino</h1>", unsafe_allow_html=True)
         
         tab_consegne, tab_carico, tab_ddt = st.tabs(["📋 Gestione Richieste", "➕ Carico Merce / Inventario", "📸 Archivia Foto DDT"])
         
+        # TAB 1: EVASIONE RICHIESTE COLLABORATORI
         with tab_consegne:
             in_attesa = df_richieste[df_richieste["stato"] == "In attesa"]
             if in_attesa.empty:
-                st.info("✨ Ottimo! Nessuna richiesta da evadere.")
+                st.info("✨ Ottimo! Nessuna richiesta da evadere al momento.")
             else:
                 for idx, row in in_attesa.iterrows():
                     with st.container():
                         c1, c2, c3 = st.columns([1, 4, 2])
                         with c1: st.write(f"**ID #{row['id_richiesta']}**")
-                        with c2: st.markdown(f"👤 **{row['collaboratore']}**<br>Richiede: **{row['quantita']}x {row['articolo']}**", unsafe_allow_html=True)
+                        with c2: st.markdown(f"👤 **{row['collaboratore']}**<br>Richiede: <span style='color:#1e3a8a;font-weight:bold;'>{row['quantita']}x {row['articolo']}</span>", unsafe_allow_html=True)
                         with c3:
                             if st.button("Consegna ✔", key=f"btn_{row['id_richiesta']}"):
                                 filtro = df_inventario["nome_articolo"] == row['articolo']
@@ -241,59 +258,73 @@ else:
                                         st.session_state.db_inventario.loc[filtro, "giacenza_totale"] = giacenza - int(row['quantita'])
                                         st.success("Evaso!")
                                         st.rerun()
-                                    else: st.error(f"Giacenza insufficiente! Solo {giacenza} pezzi.")
-                                else: st.error("Articolo 'Altro'. Registralo nel Tab 2 prima.")
+                                    else: 
+                                        st.error(f"❌ Stock insufficiente! Disponibili solo {giacenza} pezzi.")
+                                else: 
+                                    st.error("⚠️ Questo è un articolo personalizzato ('Altro'). Censiscilo nell'inventario (Tab 2) prima di consegnarlo.")
 
+        # TAB 2: AGGIUNTA MATERIALE O NUOVI ARTICOLI
         with tab_carico:
             with st.container():
                 st.markdown("### 🔧 Rifornisci Articolo Esistente")
-                art_da_caricare = st.selectbox("Seleziona l'articolo:", df_inventario["nome_articolo"].tolist())
+                art_da_caricare = st.selectbox("Seleziona l'articolo da aumentare:", df_inventario["nome_articolo"].tolist())
                 qta_da_aggiungere = st.number_input("Quantità arrivata:", min_value=1, step=1)
                 if st.button("Esegui Rifornimento"):
                     st.session_state.db_inventario.loc[df_inventario["nome_articolo"] == art_da_caricare, "giacenza_totale"] += qta_da_aggiungere
-                    st.success("Scorte aggiornate!")
+                    st.success("Giacenza aggiornata con successo!")
                     st.rerun()
             with st.container():
                 st.markdown("### ✨ Registra Nuovo Articolo nel Sistema")
-                nuovo_id_art = st.text_input("Codice Articolo:")
-                nuovo_nome_art = st.text_input("Nome materiale:")
-                nuovo_stock_art = st.number_input("Stock iniziale:", min_value=0, step=1)
+                nuovo_id_art = st.text_input("Codice Identificativo Articolo (es. A004):")
+                nuovo_nome_art = st.text_input("Nome del materiale:")
+                nuovo_stock_art = st.number_input("Stock iniziale di partenza:", min_value=0, step=1)
                 if st.button("Salva Nuovo Articolo"):
-                    nuovo_p = pd.DataFrame([{"id_articolo": nuovo_id_art, "nome_articolo": nuovo_nome_art, "giacenza_totale": int(nuovo_stock_art)}])
-                    st.session_state.db_inventario = pd.concat([df_inventario, nuovo_p], ignore_index=True)
-                    st.success("Articolo inserito!")
-                    st.rerun()
+                    if not nuovo_id_art.strip() or not nuovo_nome_art.strip():
+                        st.error("Compila tutti i campi dell'articolo.")
+                    else:
+                        nuovo_p = pd.DataFrame([{"id_articolo": nuovo_id_art.strip(), "nome_articolo": nuovo_nome_art.strip(), "giacenza_totale": int(nuovo_stock_art)}])
+                        st.session_state.db_inventario = pd.concat([df_inventario, nuovo_p], ignore_index=True)
+                        st.success("✔️ Nuovo articolo inserito in inventario!")
+                        st.rerun()
 
+        # TAB 3: ACQUISIZIONE DDT CON SCATTO FOTO E INVIO SU GOOGLE DRIVE
         with tab_ddt:
             st.markdown("### 📸 Acquisizione e Archiviazione DDT")
+            st.write("Scatta una foto direttamente con la fotocamera del telefono o carica un file per salvarlo nella cartella condivisa di Google Drive.")
             with st.container():
-                foto_ddt = st.camera_input("Inquadra il DDT e scatta la foto")
-                file_ddt = st.file_uploader("Oppure carica un file dal dispositivo", type=["png", "jpg", "jpeg", "pdf"])
+                foto_ddt = st.camera_input("Inquadra il documento di trasporto e scatta")
+                file_ddt = st.file_uploader("Oppure seleziona un file/PDF dal dispositivo", type=["png", "jpg", "jpeg", "pdf"])
+                
                 file_da_elaborare = foto_ddt if foto_ddt is not None else file_ddt
                 
                 if file_da_elaborare is not None:
-                    fornitore = st.text_input("Nome Fornitore (es. Wurth, Spaggiari):")
+                    st.image(file_da_elaborare, caption="Anteprima documento acquisito", width=250)
+                    fornitore = st.text_input("Fornitore (es. Wurth, Spaggiari, Berner):")
+                    
                     if st.button("Invia ed Archivia su Google Drive 🚀"):
-                        with st.spinner("Caricamento su Google Drive in corso..."):
+                        with st.spinner("Salvataggio e cifratura su Google Drive..."):
                             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                             tag_fornitore = f"_{fornitore.strip().replace(' ', '_')}" if fornitore.strip() else ""
-                            ext = ".pdf" if file_da_elaborare.name.endswith(".pdf") else ".jpg"
+                            ext = ".pdf" if (hasattr(file_da_elaborare, 'name') and file_da_elaborare.name.endswith(".pdf")) else ".jpg"
                             nome_file = f"DDT{tag_fornitore}_{timestamp}{ext}"
                             
                             id_drive = carica_su_drive(file_da_elaborare.getvalue(), nome_file, file_da_elaborare.type)
-                            if id_drive: st.success(f"✔️ Salvato correttamente in Drive come: {nome_file}")
+                            if id_drive: 
+                                st.success(f"✔️ Archiviato con successo su Google Drive come: {nome_file}")
 
-    # --- 3. AREA ADMIN ---
+    # --- 3. SCHERMATA AMMINISTRATORE ---
     elif st.session_state.ruolo_utente == "admin":
         st.markdown("<h1>📊 Pannello Controllo Admin</h1>", unsafe_allow_html=True)
         with st.container():
-            st.markdown("<h3>📋 Inventario Magazzino</h3>", unsafe_allow_html=True)
+            st.markdown("<h3>📋 Inventario di Magazzino</h3>", unsafe_allow_html=True)
             st.dataframe(df_inventario, use_container_width=True, hide_index=True)
         with st.container():
-            st.markdown("<h3>⏱ Storico delle Consegne</h3>", unsafe_allow_html=True)
+            st.markdown("<h3>⏱ Storico Completo Consegne</h3>", unsafe_allow_html=True)
             consegnati = df_richieste[df_richieste["stato"] == "Consegnato"]
-            if consegnati.empty: st.write("Nessuna consegna registrata.")
-            else: st.dataframe(consegnati[["data_consegna", "collaboratore", "articolo", "quantita"]], use_container_width=True, hide_index=True)
+            if consegnati.empty: 
+                st.write("Nessuna consegna registrata al momento.")
+            else: 
+                st.dataframe(consegnati[["data_consegna", "collaboratore", "articolo", "quantita"]], use_container_width=True, hide_index=True)
             
         csv = df_richieste.to_csv(index=False).encode('utf-8')
-        st.download_button(label="📥 Esporta Registro in Excel (CSV)", data=csv, file_name="registro_magazzino.csv", mime="text/csv")
+        st.download_button(label="📥 Esporta Registro Storico in Excel (CSV)", data=csv, file_name="registro_magazzino_scarpa.csv", mime="text/csv")
