@@ -4,14 +4,13 @@ from datetime import datetime
 import io
 import os
 from PIL import Image
-import numpy as np
 
-# Importiamo OpenCV per la decodifica nativa lato server
+# Importiamo pyzbar che ora funzionerà grazie a packages.txt
 try:
-    import cv2
-    OPENCV_AVAILABLE = True
+    from pyzbar.pyzbar import decode
+    PYZBAR_AVAILABLE = True
 except ImportError:
-    OPENCV_AVAILABLE = False
+    PYZBAR_AVAILABLE = False
 
 # Controllo e importazione delle librerie ufficiali di Google
 try:
@@ -175,30 +174,25 @@ else:
             st.markdown("### 🎯 Scatta una foto al Codice a Barre")
             moltiplicatore_qta = st.number_input("Pezzi da aggiungere a ogni scansione:", min_value=1, value=1, step=1)
             
-            # SCANNER CON FOTOCAMERA NATIVA
-            foto_scattata = st.camera_input("Inquadra il codice a barre da vicino (orizzontale e ben illuminato) e scatta")
+            # FOTOCAMERA NATIVA
+            foto_scattata = st.camera_input("Inquadra il codice da vicino (orizzontale) e scatta")
             
             if foto_scattata:
-                if OPENCV_AVAILABLE:
+                if PYZBAR_AVAILABLE:
                     try:
-                        # Convertiamo l'immagine scattata in un formato leggibile da OpenCV
-                        file_bytes = np.asarray(bytearray(foto_scattata.read()), dtype=np.uint8)
-                        opencv_img = cv2.imdecode(file_bytes, 1)
+                        img = Image.open(foto_scattata)
+                        codici_rilevati = decode(img)
                         
-                        # Inizializziamo il rilevatore di codici a barre nativo di OpenCV
-                        detector = cv2.BarcodeDetector()
-                        retval, decoded_info, decoded_type, points = detector.detectAndDecode(opencv_img)
-                        
-                        if retval and decoded_info[0].strip() != "":
-                            st.session_state.scanned_code = decoded_info[0].strip()
+                        if codici_rilevati:
+                            st.session_state.scanned_code = codici_rilevati[0].data.decode("utf-8").strip()
                         else:
-                            st.error("❌ Codice non rilevato. Prova ad avvicinare il codice alla fotocamera, tenendolo ben dritto al centro.")
+                            st.error("❌ Codice non rilevato nella foto. Assicurati che sia ben illuminato, dritto e non sfocato.")
                     except Exception as e:
-                        st.error(f"Errore tecnico durante la scansione: {e}")
+                        st.error(f"Errore di decodifica immagine: {e}")
                 else:
-                    st.error("Libreria grafica di scansione non pronta sul server.")
+                    st.error("Il server sta installando i componenti di packages.txt. Attendi 10 secondi e ricarica la pagina.")
 
-            # Campo manuale alternativo di riserva sempre accessibile
+            # Inserimento manuale di emergenza
             manual_input = st.text_input("O inserisci manualmente il codice (Tastiera o Pistola USB):", value="")
             if manual_input.strip():
                 st.session_state.scanned_code = manual_input.strip()
