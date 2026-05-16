@@ -158,33 +158,39 @@ if "scanned_code" not in st.session_state: st.session_state.scanned_code = ""
 
 # --- LOG INTERFACCIA DI ACCESSO ---
 if st.session_state.ruolo_utente is None:
-    st.image(URL_LOGO, width=700)
-    st.markdown("<br><h2 style='text-align: center; color: #1e293b; font-weight: 700;'>Piattaforma Logistica di Istituto</h2>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align: center; color: #64748b; margin-bottom: 30px;'>Seleziona la modalità d'ingresso per accedere ai servizi di inventario</p>", unsafe_allow_html=True)
+    # Centratura perfetta del logo e dei titoli usando colonne bilanciate
+    col_logo_l, col_logo_c, col_logo_r = st.columns([1, 2, 1])
+    with col_logo_c:
+        st.image(URL_LOGO, use_container_width=True)
+        st.markdown("<h2 style='text-align: center; color: #1e293b; font-weight: 700; margin-top: 20px; margin-bottom: 5px;'>Piattaforma Logistica di Istituto</h2>", unsafe_allow_html=True)
+        st.markdown("<p style='text-align: center; color: #64748b; margin-bottom: 25px;'>Seleziona la modalità d'ingresso per accedere ai servizi</p>", unsafe_allow_html=True)
     
-    col_l, col_c, col_r = st.columns([1, 1.8, 1])
+    # Box di login ristretto al centro per non sembrare dispersivo
+    col_l, col_c, col_r = st.columns([1.2, 1.6, 1.2])
     with col_c:
         with st.container(border=True):
             scelta_accesso = st.radio(
-                "Tipo Accesso",
+                "Modalità di accesso:",
                 options=["Collaboratore (Richiesta Materiale)", "Staff Magazzino / Amministrazione"],
                 index=0
             )
             
-            st.markdown("<div style='margin-top: 15px;'></div>", unsafe_allow_html=True)
+            st.markdown("<hr style='margin: 15px 0; border-color: #f1f5f9;'>", unsafe_allow_html=True)
             
             if scelta_accesso == "Collaboratore (Richiesta Materiale)":
                 nome_input = st.text_input("Nome e Cognome del Richiedente", placeholder="es. Mario Rossi")
-                if st.button("Accedi al modulo richieste", type="primary"):
+                st.markdown("<br>", unsafe_allow_html=True)
+                if st.button("Accedi al modulo richieste", type="primary", use_container_width=True):
                     if nome_input.strip():
                         st.session_state.ruolo_utente = "collaboratore"
                         st.session_state.utente_corrente = nome_input.strip()
                         st.rerun()
                     else:
-                        st.warning("Inserisci un nome valido per continuare.")
+                        st.warning("⚠️ Inserisci un nome valido per continuare.")
             else:
                 password_input = st.text_input("Chiave di autenticazione", type="password", placeholder="••••••••")
-                if st.button("Verifica credenziali", type="primary"):
+                st.markdown("<br>", unsafe_allow_html=True)
+                if st.button("Verifica credenziali", type="primary", use_container_width=True):
                     if password_input in PASSWORD_MAP:
                         st.session_state.ruolo_utente = "magazziniere"
                         st.session_state.magazzino_selezionato = PASSWORD_MAP[password_input]
@@ -193,10 +199,12 @@ if st.session_state.ruolo_utente is None:
                         st.session_state.ruolo_utente = "admin"
                         st.rerun()
                     else: 
-                        st.error("Chiave di sicurezza non valida.")
+                        st.error("❌ Chiave di sicurezza non valida.")
 else:
-    # --- HEADER APPLICAZIONE AVVIATA ---
-    st.image(URL_LOGO, width=600)
+    # --- HEADER APPLICAZIONE INTERNA CENTRATA ---
+    col_head_l, col_head_c, col_head_r = st.columns([1.5, 2, 1.5])
+    with col_head_c:
+        st.image(URL_LOGO, use_container_width=True)
     
     # Barra di stato utente superiore elegante
     col_info, col_logout = st.columns([4, 1])
@@ -208,7 +216,7 @@ else:
         else:
             st.markdown(f"👑 Console Principale | Ruolo: *Amministratore di Sistema*")
     with col_logout:
-        if st.button("Disconnetti", type="secondary"):
+        if st.button("Disconnetti", type="secondary", use_container_width=True):
             st.session_state.ruolo_utente = None
             st.session_state.scanned_code = ""
             st.rerun()
@@ -242,7 +250,7 @@ else:
             qta = st.number_input("Quantità desiderata", min_value=1, step=1, value=1)
             
             st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("Invia ordine al magazzino", type="primary"):
+            if st.button("Invia ordine al magazzino", type="primary", use_container_width=True):
                 if articolo_finale:
                     scheda_rich_nome = MAPPA_SCHEDE[target_magazzino]["richieste"]
                     df_richieste_spec = scarica_da_sheet(scheda_rich_nome)
@@ -307,7 +315,7 @@ else:
                 filtro_art = (df_inventario["id_articolo"].astype(str) == codice_pulito) if not df_inventario.empty else pd.Series([False])
                 
                 if filtro_art.any():
-                    if st.button(f"Conferma Carico (+ {moltiplicatore_qta} unità)", type="primary"):
+                    if st.button(f"Conferma Carico (+ {moltiplicatore_qta} unità)", type="primary", use_container_width=True):
                         df_inventario.loc[filtro_art, "giacenza_totale"] = df_inventario.loc[filtro_art, "giacenza_totale"].astype(int) + moltiplicatore_qta
                         carica_su_sheet(df_inventario, scheda_inv_reale)
                         st.success("Stock aggiornato con successo!")
@@ -317,7 +325,7 @@ else:
                     st.warning("L'articolo non è presente nell'inventario di questo reparto. Registralo ora:")
                     with st.form("nuovo_prodotto_form"):
                         nome_nuovo = st.text_input("Assegna un nome all'articolo:")
-                        if st.form_submit_button("Salva ed inserisci a catalogo"):
+                        if st.form_submit_button("Salva ed inserisci a catalogo", use_container_width=True):
                             if nome_nuovo.strip():
                                 nuovo_p = pd.DataFrame([{"magazzino": mag_corrente, "id_articolo": codice_pulito, "nome_articolo": nome_nuovo.strip(), "giacenza_totale": int(moltiplicatore_qta)}])
                                 df_inventario = pd.concat([df_inventario, nuovo_p], ignore_index=True)
@@ -346,7 +354,7 @@ else:
                                 st.markdown(f"👤 **{row['collaboratore']}** richiede **{row['quantita']}** pz. di **{row['articolo']}**")
                                 st.caption(f"Richiesto il: {row['data_richiesta']}")
                             with col_azione:
-                                if st.button("Evadi e Consegna ✔", key=f"ev_{row['id_richiesta']}", type="primary"):
+                                if st.button("Evadi e Consegna ✔", key=f"ev_{row['id_richiesta']}", type="primary", use_container_width=True):
                                     filtro = (df_inventario["nome_articolo"] == row['articolo'])
                                     if filtro.any() and int(df_inventario.loc[filtro, "giacenza_totale"].values[0]) >= int(row['quantita']):
                                         df_inventario.loc[filtro, "giacenza_totale"] = int(df_inventario.loc[filtro, "giacenza_totale"].values[0]) - int(row['quantita'])
@@ -364,7 +372,7 @@ else:
             with st.container(border=True):
                 mat_urgente = st.text_input("Descrizione articolo o bene:")
                 qta_urgente = st.number_input("Quantità pacchi/unità:", min_value=1, step=1, value=1)
-                if st.button("Invia richiesta di approvvigionamento", type="primary"):
+                if st.button("Invia richiesta di approvvigionamento", type="primary", use_container_width=True):
                     if mat_urgente.strip():
                         nuovo_id_a = int(df_approv["id_acquisto"].astype(float).max()) + 1 if not df_approv.empty else 1
                         nuovo_o = pd.DataFrame([{"id_acquisto": nuovo_id_a, "magazzino": mag_corrente, "articolo": mat_urgente.strip(), "quantita_richiesta": int(qta_urgente), "stato": "In attesa", "data_richiesta": datetime.now().strftime("%d/%m/%Y %H:%M")}])
@@ -379,7 +387,7 @@ else:
             with st.container(border=True):
                 file_ddt = st.file_uploader("Seleziona o fotografa il documento fiscale (DDT)", type=["png", "jpg", "jpeg", "pdf"])
                 fornitore = st.text_input("Azienda / Fornitore:")
-                if file_ddt and st.button("Carica su Cloud Drive", type="primary"):
+                if file_ddt and st.button("Carica su Cloud Drive", type="primary", use_container_width=True):
                     if fornitore.strip():
                         nome_f = f"DDT_{mag_corrente.replace(' ', '_')}_{fornitore.strip()}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
                         if carica_su_drive(file_ddt.getvalue(), nome_f, file_ddt.type, mag_corrente):
@@ -419,7 +427,7 @@ else:
                                 st.markdown(f"#### {row['quantita_richiesta']}x {row['articolo']}")
                                 st.caption(f"Richiesta registrata il: {row['data_richiesta']}")
                             with c_b:
-                                if st.button("Autorizza e Inserisci", key=f"ap_ad_{row['id_acquisto']}", type="primary"):
+                                if st.button("Autorizza e Inserisci", key=f"ap_ad_{row['id_acquisto']}", type="primary", use_container_width=True):
                                     df_approv_admin.loc[df_approv_admin["id_acquisto"].astype(str) == str(row["id_acquisto"]), "stato"] = "Approvato"
                                     carica_su_sheet(df_approv_admin, "Ordini")
                                     
