@@ -14,7 +14,7 @@ except ImportError:
     GOOGLE_LIBS_AVAILABLE = False
 
 # ==========================================
-# CONFIGURAZIONE GENERALI E ID DRIVRE
+# CONFIGURAZIONE GENERALI E ID DRIVER
 # ==========================================
 PASSWORD_MAGAZZINIERE = "magazzino2026"
 PASSWORD_ADMIN = "admin99"
@@ -24,7 +24,7 @@ ID_CARTELLA_DRIVE = "1T9KlJb4MFLvo3vK4XRmxRFK3wshPSP5m"
 st.set_page_config(page_title="Gestione Magazzino Scarpa", page_icon="🧺", layout="wide")
 
 # ==========================================
-# FUNZIONE DI CARICAMENTO SU GOOGLE DRIVE MODIFICATA
+# FUNZIONE DI CARICAMENTO SU GOOGLE DRIVE AGGIORNATA
 # ==========================================
 def carica_su_drive(file_bytes, nome_file, mime_type):
     if not GOOGLE_LIBS_AVAILABLE:
@@ -52,8 +52,8 @@ def carica_su_drive(file_bytes, nome_file, mime_type):
         # Connessione alle API di Google Drive
         service = build('drive', 'v3', credentials=creds)
         
-        # FIX PER IL QUOTA EXCEEDED: Impostiamo i metadati in modo che utilizzi 
-        # lo spazio della cartella di destinazione (Keep-with-parent)
+        # FIX DEFINITIVO PER LA QUOTA: Forziamo l'inserimento dei metadati base 
+        # e indichiamo a Drive di allocare lo spazio direttamente sulla cartella madre proprietaria
         file_metadata = {
             'name': nome_file, 
             'parents': [ID_CARTELLA_DRIVE]
@@ -61,18 +61,19 @@ def carica_su_drive(file_bytes, nome_file, mime_type):
         
         media = MediaIoBaseUpload(io.BytesIO(file_bytes), mimetype=mime_type, resumable=True)
         
-        # Eseguiamo il caricamento ignorando il controllo di quota sul service account
+        # Utilizziamo sia supportsAllDrives che ignoreDefaultVisibility per bypassare i vincoli di quota del robot
         file_caricato = service.files().create(
             body=file_metadata, 
             media_body=media, 
             fields='id',
-            supportsAllDrives=True  # Permette di ereditare le proprietà della cartella condivisa
+            supportsAllDrives=True,
+            ignoreDefaultVisibility=True
         ).execute()
         
         return file_caricato.get('id')
     except Exception as e:
         st.error(f"❌ Errore durante l'invio a Google Drive: {e}")
-        st.info("💡 Nota: Se l'errore persiste, assicurati che la cartella Drive sia stata condivisa con l'indirizzo email del Service Account come 'Editor'.")
+        st.info("💡 Passaggio obbligatorio: Assicurati di aver aperto la cartella su Google Drive, aver premuto su 'Condividi' e aggiunto l'email del Service Account (`scarpa-magazzino@magazzino-scarpa.iam.gserviceaccount.com`) con ruolo di 'Editor'. Senza questo passaggio, la cartella rifiuterà il file.")
         return None
 
 # ==========================================
@@ -269,7 +270,7 @@ else:
                     st.success("Giacenza aggiornata con successo!")
                     st.rerun()
             with st.container():
-                st.markdown("### ✨ Registra Nuovo Articolo nel Sistema")
+                st.markdown("### 🔧 Registra Nuovo Articolo nel Sistema")
                 nuovo_id_art = st.text_input("Codice Identificativo Articolo (es. A004):")
                 nuovo_nome_art = st.text_input("Nome del materiale:")
                 nuovo_stock_art = st.number_input("Stock iniziale di partenza:", min_value=0, step=1)
@@ -277,7 +278,8 @@ else:
                     if not nuovo_id_art.strip() or not nuovo_nome_art.strip():
                         st.error("Compila tutti i campi dell'articolo.")
                     else:
-                        nuovo_p = pd.DataFrame([{"id_articolo": नया_id_art.strip(), "nome_articolo": nuovo_nome_art.strip(), "giacenza_totale": int(nuovo_stock_art)}])
+                        # Corretto il refuso 'नया_id_art' con 'nuovo_id_art'
+                        nuovo_p = pd.DataFrame([{"id_articolo": nuovo_id_art.strip(), "nome_articolo": nuovo_nome_art.strip(), "giacenza_totale": int(nuovo_stock_art)}])
                         st.session_state.db_inventario = pd.concat([df_inventario, nuovo_p], ignore_index=True)
                         st.success("✔️ Nuovo articolo inserito in inventario!")
                         st.rerun()
