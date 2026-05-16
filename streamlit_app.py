@@ -13,7 +13,7 @@ try:
 except ImportError:
     GSPREAD_AVAILABLE = False
 
-# Importiamo pyzbar per i codici a barre
+# Importiamo pyzbar per i codici a barre dalle foto scattate
 try:
     from pyzbar.pyzbar import decode
     PYZBAR_AVAILABLE = True
@@ -42,9 +42,13 @@ LISTA_MAGAZZINI = ["Personale ATA", "Officina", "Tecnici Informatici"]
 st.set_page_config(page_title="Gestione Magazzini Scarpa", page_icon="🧺", layout="wide")
 
 # --- CONNESSIONE A GOOGLE SHEETS ---
-@st.cache_resource(ttl=60)
+@st.cache_resource(ttl=30)
 def connetti_google_sheets():
-    if not GSPREAD_AVAILABLE or "google_creds" not in st.secrets:
+    if not GSPREAD_AVAILABLE:
+        st.error("Errore: La libreria `gspread` non è installata. Controlla il file requirements.txt.")
+        return None
+    if "google_creds" not in st.secrets:
+        st.error("Errore: Credenziali `google_creds` non trovate nei Secrets di Streamlit Cloud.")
         return None
     try:
         creds_dict = dict(st.secrets["google_creds"])
@@ -58,50 +62,68 @@ def connetti_google_sheets():
         client = gspread.authorize(creds)
         return client.open_by_key(SPREADSHEET_ID)
     except Exception as e:
-        st.error(f"Errore di connessione a Google Sheets: {e}")
+        st.error(f"Impossibile connettersi al foglio Google. Dettaglio errore: {e}")
         return None
 
 # --- FUNZIONI DI LETTURA / SCRITTURA ---
 def scarica_da_sheet(nome_scheda):
     sh = connetti_google_sheets()
-    if sh:
+    if sh is not None:
         try:
             worksheet = sh.worksheet(nome_scheda)
             records = worksheet.get_all_records()
             return pd.DataFrame(records)
-        except Exception:
-            # Se la scheda non esiste o è vuota, restituisce un DF vuoto con colonne base
+        except gspread.exceptions.WorksheetNotFound:
+            # Crea la scheda se manca sul file online
             if nome_scheda == "Inventario":
-                return pd.DataFrame(columns=["magazzino", "id_articolo", "nome_articolo", "giacenza_totale"])
+                df_base = pd.DataFrame(columns=["magazzino", "id_articolo", "nome_articolo", "giacenza_totale"])
             elif nome_scheda == "Richieste":
-                return pd.DataFrame(columns=["id_richiesta", "magazzino", "collaboratore", "articolo", "quantita", "stato", "data_richiesta", "data_consegna"])
+                df_base = pd.DataFrame(columns=["id_richiesta", "magazzino", "collaboratore", "articolo", "quantita", "stato", "data_richiesta", "data_consegna"])
             else:
-                return pd.DataFrame(columns=["id_acquisto", "magazzino", "articolo", "quantita_richiesta", "stato", "data_richiesta"])
+                df_base = pd.DataFrame(columns=["id_acquisto", "magazzino", "articolo", "quantita_richiesta", "stato", "data_richiesta"])
+            carica_su_sheet(df_base, nome_scheda)
+            return df_base
+        except Exception as e:
+            st.error(f"Errore durante la lettura della scheda '{nome_scheda}': {e}")
+            return pd.DataFrame()
     return pd.DataFrame()
 
 def carica_su_sheet(df, nome_scheda):
     sh = connetti_google_sheets()
-    if sh:
+    if sh is not None:
         try:
             try:
                 worksheet = sh.worksheet(nome_scheda)
             except gspread.exceptions.WorksheetNotFound:
-                worksheet = sh.add_worksheet(title=nome_scheda, rows="100", cols="20")
+                worksheet = sh.add_worksheet(title=nome_scheda, rows="500", cols="20")
             
             worksheet.clear()
-            # Sostituisce i valori NaN/Nulli per evitare errori JSON
             df_pulito = df.fillna("")
-            worksheet.update([df_pulito.columns.values.tolist()] + df_pulito.values.tolist())
+            # Converte tutte le colonne in stringhe o numeri nativi per evitare bug JSON serialization
+            for col in df_pulito.columns:
+                df_pulito[col] = df_pulito[col].astype(str)
+            
+            valori_da_inviare = [df_pulito.columns.values.tolist()] + df_pulito.values.tolist()
+            worksheet.update(valori_da_inviare)
         except Exception as e:
-            st.error(f"Impossibile aggiornare Google Sheets: {e}")
+            st.error(f"Errore durante il salvataggio su Google Sheets nella scheda '{nome_scheda}': {e}")
 
-# Inizializzazione dati in session_state prelevandoli da Google Sheet
-if "db_inventario" not in st.session_state or st.sidebar.button("🔄 Forza Sincronizzazione Fogli Google"):
+# Inizializzazione controllata dei dati
+if "db_inventario" not in st.session_state:
+    st.session_state.db_inventario = scarica_da_sheet("Inventario")
+if "db_richieste" not in st.session_state:
+    st.session_state.db_richieste = scarica_da_sheet("Richieste")
+if "db_approvvigionamenti" not in st.session_state:
+    st.session_state.db_approvvigionamenti = scarica_da_sheet("Ordini")
+
+# Bottone manuale di emergenza per forzare l'aggiornamento dal foglio
+if st.sidebar.button("🔄 Sincronizza ora con Google Fogli"):
     st.session_state.db_inventario = scarica_da_sheet("Inventario")
     st.session_state.db_richieste = scarica_da_sheet("Richieste")
     st.session_state.db_approvvigionamenti = scarica_da_sheet("Ordini")
+    st.rerun()
 
-# --- FUNZIONE CARICAMENTO COPIE DDT SU DRIVE ---
+# --- FUNZIONE COPIE DDT SU DRIVE ---
 def carica_su_drive(file_bytes, nome_file, mime_type, nome_magazzino):
     if not GOOGLE_DRIVE_AVAILABLE or "google_creds" not in st.secrets: 
         return None
@@ -137,7 +159,7 @@ st.markdown("""
     <style>
         .stApp { background-color: #f1f5f9 !important; color: #0f172a !important; font-family: 'Inter', sans-serif; }
         [data-testid="stMainBlockContainer"] { max-width: 1150px; margin: 0 auto; padding-top: 2rem; }
-        h1 { color: #0f172a !important; font-family: 'Montserrat', sans-serif; font-weight: 800 !important; text-align: center; margin-bottom: 30px !important; }
+        h1 { color: #0f172a !important; font-weight: 800 !important; text-align: center; margin-bottom: 30px !important; }
         h2, h3, h4, label, [data-testid="stWidgetLabel"] p { color: #1e293b !important; font-weight: 700 !important; }
         [data-testid="stContainer"] { background-color: #ffffff !important; border: 1px solid #e2e8f0 !important; border-radius: 16px !important; padding: 28px !important; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05) !important; margin-bottom: 20px; }
         div.stButton > button:first-child { background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%) !important; color: #ffffff !important; border-radius: 10px !important; border: none !important; padding: 12px 24px !important; font-weight: 600 !important; width: 100%; }
@@ -194,31 +216,32 @@ else:
             
             articoli_filtrati = ["Altro..."]
             if not df_inventario.empty and "magazzino" in df_inventario.columns:
-                articoli_filtrati = df_inventario[df_inventario["magazzino"] == target_magazzino]["nome_articolo"].tolist() + ["Altro..."]
+                lista_prodotti = df_inventario[df_inventario["magazzino"] == target_magazzino]["nome_articolo"].tolist()
+                articoli_filtrati = lista_prodotti + ["Altro..."] if lista_prodotti else ["Altro..."]
                 
             articolo_selezionato = st.selectbox("Seleziona cosa ti serve:", articoli_filtrati)
             articolo_finale = st.text_input("Specifica il materiale a mano:") if articolo_selezionato == "Altro..." else articolo_selezionato
             qta = st.number_input("Quantità necessaria:", min_value=1, step=1)
             
             if st.button("Invia Ordine in Magazzino"):
-                nuovo_id = int(df_richieste["id_richiesta"].max()) + 1 if not df_richieste.empty else 1
+                nuovo_id = int(df_richieste["id_richiesta"].astype(float).max()) + 1 if not df_richieste.empty else 1
                 nuova_r = pd.DataFrame([{"id_richiesta": nuovo_id, "magazzino": target_magazzino, "collaboratore": st.session_state.utente_corrente, "articolo": articolo_finale, "quantita": int(qta), "stato": "In attesa", "data_richiesta": datetime.now().strftime("%d/%m/%Y %H:%M"), "data_consegna": ""}])
                 st.session_state.db_richieste = pd.concat([df_richieste, nuova_r], ignore_index=True)
                 carica_su_sheet(st.session_state.db_richieste, "Richieste")
-                st.success("✔️ Richiesta salvata sul Cloud di Google Sheets!")
+                st.success("✔️ Richiesta inoltrata e salvata su Google Sheets!")
 
     # --- AREA MAGAZZINIERE ---
     elif st.session_state.ruolo_utente == "magazziniere":
         mag_corrente = st.session_state.magazzino_selezionato
         st.markdown(f"<h1>🚚 Pannello Operativo: {mag_corrente}</h1>", unsafe_allow_html=True)
         
-        tab_carico, tab_consegne, tab_rifornisci, tab_ddt = st.tabs(["📷 SCANNER REAL-TIME", "📋 Richieste", "🛒 Ordini", "📸 DDT"])
+        tab_carico, tab_consegne, tab_rifornisci, tab_ddt = st.tabs(["📷 SCANNER REAL-TIME", "📋 Richieste dipendenti", "🛒 Ordini Nuovi", "📸 DDT"])
         
         with tab_carico:
-            st.markdown("### 🎯 Scatta una foto al Codice a Barre")
+            st.markdown("### 🎯 Carico tramite Fotocamera o Pistola USB")
             moltiplicatore_qta = st.number_input("Pezzi da aggiungere a ogni scansione:", min_value=1, value=1, step=1)
             
-            foto_scattata = st.camera_input("Inquadra il codice da vicino (orizzontale) e scatta")
+            foto_scattata = st.camera_input("Inquadra il codice a barre da vicino e scatta")
             if foto_scattata and PYZBAR_AVAILABLE:
                 try:
                     img = Image.open(foto_scattata)
@@ -226,119 +249,119 @@ else:
                     if codici_rilevati:
                         st.session_state.scanned_code = codici_rilevati[0].data.decode("utf-8").strip()
                     else:
-                        st.error("❌ Codice non rilevato. Riprova tenendolo fermo o migliorando la luce.")
+                        st.error("❌ Codice non rilevato nella foto. Assicurati che sia ben illuminato e fermo.")
                 except Exception as e:
-                    st.error(f"Errore decodifica: {e}")
+                    st.error(f"Errore decodifica immagine: {e}")
 
-            manual_input = st.text_input("O inserisci manualmente il codice (Tastiera o Pistola USB):")
+            manual_input = st.text_input("Inserimento tramite Lettore di Codici USB / Pistola Laser (o tastiera):")
             if manual_input.strip():
                 st.session_state.scanned_code = manual_input.strip()
 
             if st.session_state.scanned_code:
                 codice_pulito = str(st.session_state.scanned_code)
-                st.markdown(f"📥 **Codice identificato:** `{codice_pulito}`")
+                st.markdown(f"📥 **Codice letto:** `{codice_pulito}`")
                 
                 filtro_art = (df_inventario["id_articolo"].astype(str) == codice_pulito) & (df_inventario["magazzino"] == mag_corrente) if not df_inventario.empty else pd.Series([False])
                 
                 if filtro_art.any():
-                    st.session_state.db_inventario.loc[filtro_art, "giacenza_totale"] += moltiplicatore_qta
+                    # Converte la giacenza in numero prima di sommare
+                    st.session_state.db_inventario.loc[filtro_art, "giacenza_totale"] = st.session_state.db_inventario.loc[filtro_art, "giacenza_totale"].astype(int) + moltiplicatore_qta
                     carica_su_sheet(st.session_state.db_inventario, "Inventario")
-                    st.success("✔️ Giacenza aggiornata direttamente su Google Sheets!")
-                    if st.button("🔄 Prossima scansione"):
+                    st.success("✔️ Stock incrementato con successo su Google Sheets!")
+                    if st.button("🔄 Cancella codice e fai nuova scansione"):
                         st.session_state.scanned_code = ""
                         st.rerun()
                 else:
-                    st.warning("🆕 Codice non presente nel catalogo di questo reparto. Censiscilo:")
-                    with st.form("veloce_censimento"):
-                        nome_nuovo = st.text_input("Nome Articolo:")
-                        if st.form_submit_button("Salva Prodotto"):
+                    st.warning("🆕 Questo codice non è associato a nessun articolo in questo reparto. Registralo ora:")
+                    with st.form("nuovo_prodotto_form"):
+                        nome_nuovo = st.text_input("Assegna un Nome a questo articolo:")
+                        if st.form_submit_button("Censisci e Salva"):
                             if nome_nuovo.strip():
                                 nuovo_p = pd.DataFrame([{"magazzino": mag_corrente, "id_articolo": codice_pulito, "nome_articolo": nome_nuovo.strip(), "giacenza_totale": int(moltiplicatore_qta)}])
                                 st.session_state.db_inventario = pd.concat([df_inventario, nuovo_p], ignore_index=True)
                                 carica_su_sheet(st.session_state.db_inventario, "Inventario")
-                                st.success("✔️ Salvato!")
+                                st.success(f"✔️ {nome_nuovo} salvato sul database cloud!")
                                 st.session_state.scanned_code = ""
                                 st.rerun()
 
             st.write("---")
-            st.markdown("#### 📦 Inventario Reparto")
+            st.markdown("#### 📦 Inventario Attuale Reparto")
             if not df_inventario.empty and "magazzino" in df_inventario.columns:
                 st.dataframe(df_inventario[df_inventario["magazzino"] == mag_corrente], use_container_width=True, hide_index=True)
 
-        # --- ALTRE OPERAZIONI MAGAZZINIERE ---
         with tab_consegne:
             if not df_richieste.empty and "stato" in df_richieste.columns:
                 richieste_mie = df_richieste[(df_richieste["stato"] == "In attesa") & (df_richieste["magazzino"] == mag_corrente)]
-                if richieste_mie.empty: st.info("Nessuna richiesta in attesa.")
+                if richieste_mie.empty: 
+                    st.info("Nessuna richiesta di prelievo pendente.")
                 for idx, row in richieste_mie.iterrows():
                     with st.container():
-                        st.write(f"👤 **{row['collaboratore']}** richiede {row['quantita']}x {row['articolo']}")
-                        if st.button("Segna come Consegnato ✔", key=f"ev_{row['id_richiesta']}"):
+                        st.write(f"👤 **{row['collaboratore']}** richiede {row['quantita']}x *{row['articolo']}*")
+                        if st.button("Consegna Materiale ✔", key=f"ev_{row['id_richiesta']}"):
                             filtro = (df_inventario["nome_articolo"] == row['articolo']) & (df_inventario["magazzino"] == mag_corrente)
-                            if filtro.any() and df_inventario.loc[filtro, "giacenza_totale"].values[0] >= row['quantita']:
-                                st.session_state.db_inventario.loc[filtro, "giacenza_totale"] -= row['quantita']
-                                st.session_state.db_richieste.loc[st.session_state.db_richieste["id_richiesta"] == row["id_richiesta"], "stato"] = "Consegnato"
-                                st.session_state.db_richieste.loc[st.session_state.db_richieste["id_richiesta"] == row["id_richiesta"], "data_consegna"] = datetime.now().strftime("%d/%m/%Y %H:%M")
+                            if filtro.any() and int(df_inventario.loc[filtro, "giacenza_totale"].values[0]) >= int(row['quantita']):
+                                st.session_state.db_inventario.loc[filtro, "giacenza_totale"] = int(df_inventario.loc[filtro, "giacenza_totale"].values[0]) - int(row['quantita'])
+                                st.session_state.db_richieste.loc[st.session_state.db_richieste["id_richiesta"].astype(str) == str(row["id_richiesta"]), "stato"] = "Consegnato"
+                                st.session_state.db_richieste.loc[st.session_state.db_richieste["id_richiesta"].astype(str) == str(row["id_richiesta"]), "data_consegna"] = datetime.now().strftime("%d/%m/%Y %H:%M")
                                 carica_su_sheet(st.session_state.db_inventario, "Inventario")
                                 carica_su_sheet(st.session_state.db_richieste, "Richieste")
                                 st.rerun()
-                            else: st.error("Errore: Stock insufficiente nel foglio Google!")
+                            else: 
+                                st.error("❌ Stock insufficiente sul foglio Google per evadere la richiesta!")
 
         with tab_rifornisci:
-            mat_urgente = st.text_input("Nome materiale mancante:")
-            qta_urgente = st.number_input("Q.tà:", min_value=1, step=1)
-            if st.button("Invia ad Admin"):
-                nuovo_id_a = int(df_approv["id_acquisto"].max()) + 1 if not df_approv.empty else 1
+            mat_urgente = st.text_input("Articolo/Materiale mancante da ordinare:")
+            qta_urgente = st.number_input("Q.tà da richiedere:", min_value=1, step=1)
+            if st.button("Invia Richiesta d'Acquisto ad Admin"):
+                nuovo_id_a = int(df_approv["id_acquisto"].astype(float).max()) + 1 if not df_approv.empty else 1
                 nuovo_o = pd.DataFrame([{"id_acquisto": nuovo_id_a, "magazzino": mag_corrente, "articolo": mat_urgente, "quantita_richiesta": int(qta_urgente), "stato": "In attesa", "data_richiesta": datetime.now().strftime("%d/%m/%Y %H:%M")}])
                 st.session_state.db_approvvigionamenti = pd.concat([df_approv, nuovo_o], ignore_index=True)
                 carica_su_sheet(st.session_state.db_approvvigionamenti, "Ordini")
-                st.success("Richiesta inviata all'Admin e salvata sul foglio!")
+                st.success("✔️ Inviata all'approvazione dell'amministratore!")
 
         with tab_ddt:
-            file_ddt = st.file_uploader("Carica foto o PDF del DDT", type=["png", "jpg", "jpeg", "pdf"])
-            fornitore = st.text_input("Nome Fornitore:")
-            if file_ddt and st.button("Salva ed Invia a Drive"):
-                nome_f = f"DDT_{mag_corrente}_{fornitore}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
+            file_ddt = st.file_uploader("Carica scansione o foto del DDT ricevuto", type=["png", "jpg", "jpeg", "pdf"])
+            fornitore = st.text_input("Fornitore DDT:")
+            if file_ddt and st.button("Invia Documento all'Archivio Drive"):
+                nome_f = f"DDT_{mag_corrente.replace(' ', '_')}_{fornitore}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
                 if carica_su_drive(file_ddt.getvalue(), nome_f, file_ddt.type, mag_corrente):
-                    st.success("File archiviato con successo nella cartella condivisa di Drive!")
+                    st.success("✔️ File caricato nella cartella corretta di Google Drive!")
 
     # --- AREA ADMIN ---
     elif st.session_state.ruolo_utente == "admin":
         st.markdown("<h1>👑 Pannello di Controllo Amministratore</h1>", unsafe_allow_html=True)
         
-        # Filtro rapido ordinato per magazzino nel pannello admin
-        mag_filtro_admin = st.selectbox("Filtra visualizzazione dati per reparto:", ["Tutti"] + LISTA_MAGAZZINI)
-        
-        tab_st, tab_ac = st.tabs(["📊 Stato Scorte (Ordinato)", "🛒 Richieste d'Acquisto Reparti"])
+        mag_filtro_admin = st.selectbox("Filtra visualizzazione tabelle per Magazzino:", ["Mostra Tutti"] + LISTA_MAGAZZINI)
+        tab_st, tab_ac = st.tabs(["📊 Riepilogo Giacenze (Ordinato)", "🛒 Approvazioni Rifornimenti"])
         
         with tab_st:
             if not df_inventario.empty:
-                df_mostrato = df_inventario if mag_filtro_admin == "Tutti" else df_inventario[df_inventario["magazzino"] == mag_filtro_admin]
-                # Ordina l'inventario per magazzino e poi per nome articolo
+                df_mostrato = df_inventario if mag_filtro_admin == "Mostra Tutti" else df_inventario[df_inventario["magazzino"] == mag_filtro_admin]
+                # Ordinamento alfabetico per magazzino e per nome prodotto richiesto
                 df_mostrato = df_mostrato.sort_values(by=["magazzino", "nome_articolo"])
                 st.dataframe(df_mostrato, use_container_width=True, hide_index=True)
             else:
-                st.info("Nessun articolo registrato nel foglio Google.")
+                st.info("Nessun dato presente nel foglio Google.")
                 
         with tab_ac:
             if not df_approv.empty and "stato" in df_approv.columns:
                 pendenti = df_approv[df_approv["stato"] == "In attesa"]
-                if mag_filtro_admin != "Tutti":
+                if mag_filtro_admin != "Mostra Tutti":
                     pendenti = pendenti[pendenti["magazzino"] == mag_filtro_admin]
                 
                 if pendenti.empty: 
-                    st.info("Nessun ordine di rifornimento pendente per la selezione corrente.")
+                    st.info("Non ci sono ordini di acquisto in attesa di sblocco.")
                 for idx, row in pendenti.iterrows():
                     with st.container():
-                        st.write(f"🏢 Reparto: **{row['magazzino']}** richiede {row['quantita_richiesta']}x **{row['articolo']}**")
-                        if st.button("Approva ed Incrementa Stock", key=f"ap_ad_{row['id_acquisto']}"):
-                            st.session_state.db_approvvigionamenti.loc[df_approv["id_acquisto"] == row["id_acquisto"], "stato"] = "Approvato"
+                        st.write(f"🏢 **{row['magazzino']}** richiede {row['quantita_richiesta']}x **{row['articolo']}**")
+                        if st.button("Approva Ordine e Aggiungi a Stock", key=f"ap_ad_{row['id_acquisto']}"):
+                            st.session_state.db_approvvigionamenti.loc[df_approv["id_acquisto"].astype(str) == str(row["id_acquisto"]), "stato"] = "Approvato"
                             
                             filtro = (df_inventario["nome_articolo"] == row["articolo"]) & (df_inventario["magazzino"] == row["magazzino"]) if not df_inventario.empty else pd.Series([False])
                             if filtro.any():
-                                st.session_state.db_inventario.loc[filtro, "giacenza_totale"] += row["quantita_richiesta"]
+                                st.session_state.db_inventario.loc[filtro, "giacenza_totale"] = st.session_state.db_inventario.loc[filtro, "giacenza_totale"].astype(int) + int(row["quantita_richiesta"])
                             else:
-                                nuovo_p = pd.DataFrame([{"magazzino": row["magazzino"], "id_articolo": f"NEW_{row['id_acquisto']}", "nome_articolo": row["articolo"], "giacenza_totale": row["quantita_richiesta"]}])
+                                nuovo_p = pd.DataFrame([{"magazzino": row["magazzino"], "id_articolo": f"NEW_{row['id_acquisto']}", "nome_articolo": row["articolo"], "giacenza_totale": int(row["quantita_richiesta"])}])
                                 st.session_state.db_inventario = pd.concat([st.session_state.db_inventario, nuovo_p], ignore_index=True)
                             
                             carica_su_sheet(st.session_state.db_inventario, "Inventario")
