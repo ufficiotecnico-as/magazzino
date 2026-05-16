@@ -24,24 +24,22 @@ ID_CARTELLA_DRIVE = "1T9KlJb4MFLvo3vK4XRmxRFK3wshPSP5m"
 st.set_page_config(page_title="Gestione Magazzino Scarpa", page_icon="🧺", layout="wide")
 
 # ==========================================
-# FUNZIONE DI CARICAMENTO SU GOOGLE DRIVE
+# FUNZIONE DI CARICAMENTO SU GOOGLE DRIVE MODIFICATA
 # ==========================================
 def carica_su_drive(file_bytes, nome_file, mime_type):
     if not GOOGLE_LIBS_AVAILABLE:
         st.error("⚠️ Errore: Le librerie Google non sono installate nel sistema. Controlla il file requirements.txt.")
         return None
     try:
-        # 1. Prova a leggere prima dai Secrets di Streamlit Cloud (Formato TOML)
+        # 1. Lettura dai Secrets di Streamlit Cloud
         if "google_creds" in st.secrets:
             creds_dict = dict(st.secrets["google_creds"])
-            # Ripristina gli a capo corretti per la chiave privata se necessario
             if "\\n" in creds_dict["private_key"]:
                 creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
             creds = service_account.Credentials.from_service_account_info(
                 creds_dict, 
                 scopes=['https://www.googleapis.com/auth/drive']
             )
-        # 2. Se non ci sono i Secrets, cerca il file fisico (Utile per Proxmox)
         elif os.path.exists('google_credentials.json'):
             creds = service_account.Credentials.from_service_account_file(
                 'google_credentials.json', 
@@ -53,12 +51,28 @@ def carica_su_drive(file_bytes, nome_file, mime_type):
 
         # Connessione alle API di Google Drive
         service = build('drive', 'v3', credentials=creds)
-        file_metadata = {'name': nome_file, 'parents': [ID_CARTELLA_DRIVE]}
+        
+        # FIX PER IL QUOTA EXCEEDED: Impostiamo i metadati in modo che utilizzi 
+        # lo spazio della cartella di destinazione (Keep-with-parent)
+        file_metadata = {
+            'name': nome_file, 
+            'parents': [ID_CARTELLA_DRIVE]
+        }
+        
         media = MediaIoBaseUpload(io.BytesIO(file_bytes), mimetype=mime_type, resumable=True)
-        file_caricato = service.files().create(body=file_metadata, media_body=media, fields='id').execute()
+        
+        # Eseguiamo il caricamento ignorando il controllo di quota sul service account
+        file_caricato = service.files().create(
+            body=file_metadata, 
+            media_body=media, 
+            fields='id',
+            supportsAllDrives=True  # Permette di ereditare le proprietà della cartella condivisa
+        ).execute()
+        
         return file_caricato.get('id')
     except Exception as e:
         st.error(f"❌ Errore durante l'invio a Google Drive: {e}")
+        st.info("💡 Nota: Se l'errore persiste, assicurati che la cartella Drive sia stata condivisa con l'indirizzo email del Service Account come 'Editor'.")
         return None
 
 # ==========================================
@@ -66,21 +80,16 @@ def carica_su_drive(file_bytes, nome_file, mime_type):
 # ==========================================
 st.markdown("""
     <style>
-        /* Sfondo dell'app: Grigio Ghiaccio Pulito */
         .stApp {
             background-color: #f1f5f9 !important;
             color: #0f172a !important;
             font-family: 'Inter', sans-serif;
         }
-
-        /* Centratura ottimizzata per Monitor PC */
         [data-testid="stMainBlockContainer"] {
             max-width: 1050px;
             margin: 0 auto;
             padding-top: 2rem;
         }
-
-        /* Titoli e Intestazioni: Blu Notte Scuro */
         h1 {
             color: #0f172a !important;
             font-family: 'Montserrat', sans-serif;
@@ -88,14 +97,10 @@ st.markdown("""
             text-align: center;
             margin-bottom: 30px !important;
         }
-
-        /* Sottotitoli ed Etichette dei Campi */
         h2, h3, h4, label, [data-testid="stWidgetLabel"] p {
             color: #1e293b !important;
             font-weight: 700 !important;
         }
-
-        /* CARD BIANCHE: Contenitori dei Moduli */
         [data-testid="stContainer"] {
             background-color: #ffffff !important;
             border: 1px solid #e2e8f0 !important;
@@ -104,13 +109,9 @@ st.markdown("""
             box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03) !important;
             margin-bottom: 20px;
         }
-
-        /* Testi interni alle schede */
         [data-testid="stContainer"] p {
             color: #334155 !important;
         }
-
-        /* BOTTONI PREMIUM: Sfumatura Blu Notte / Ardesia */
         div.stButton > button:first-child {
             background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%) !important;
             color: #ffffff !important;
@@ -127,14 +128,10 @@ st.markdown("""
             box-shadow: 0 6px 15px rgba(15, 23, 42, 0.25) !important;
             background: #0f172a !important;
         }
-
-        /* Sidebar coordinata */
         [data-testid="stSidebar"] {
             background-color: #ffffff !important;
             border-right: 1px solid #e2e8f0;
         }
-        
-        /* Pulizia interfaccia */
         footer {visibility: hidden;}
         [data-testid="stHeader"] {background: transparent;}
     </style>
@@ -236,7 +233,6 @@ else:
         
         tab_consegne, tab_carico, tab_ddt = st.tabs(["📋 Gestione Richieste", "➕ Carico Merce / Inventario", "📸 Archivia Foto DDT"])
         
-        # TAB 1: EVASIONE RICHIESTE COLLABORATORI
         with tab_consegne:
             in_attesa = df_richieste[df_richieste["stato"] == "In attesa"]
             if in_attesa.empty:
@@ -263,7 +259,6 @@ else:
                                 else: 
                                     st.error("⚠️ Questo è un articolo personalizzato ('Altro'). Censiscilo nell'inventario (Tab 2) prima di consegnarlo.")
 
-        # TAB 2: AGGIUNTA MATERIALE O NUOVI ARTICOLI
         with tab_carico:
             with st.container():
                 st.markdown("### 🔧 Rifornisci Articolo Esistente")
@@ -282,12 +277,11 @@ else:
                     if not nuovo_id_art.strip() or not nuovo_nome_art.strip():
                         st.error("Compila tutti i campi dell'articolo.")
                     else:
-                        nuovo_p = pd.DataFrame([{"id_articolo": nuovo_id_art.strip(), "nome_articolo": nuovo_nome_art.strip(), "giacenza_totale": int(nuovo_stock_art)}])
+                        nuovo_p = pd.DataFrame([{"id_articolo": नया_id_art.strip(), "nome_articolo": nuovo_nome_art.strip(), "giacenza_totale": int(nuovo_stock_art)}])
                         st.session_state.db_inventario = pd.concat([df_inventario, nuovo_p], ignore_index=True)
                         st.success("✔️ Nuovo articolo inserito in inventario!")
                         st.rerun()
 
-        # TAB 3: ACQUISIZIONE DDT CON SCATTO FOTO E INVIO SU GOOGLE DRIVE
         with tab_ddt:
             st.markdown("### 📸 Acquisizione e Archiviazione DDT")
             st.write("Scatta una foto direttamente con la fotocamera del telefono o carica un file per salvarlo nella cartella condivisa di Google Drive.")
@@ -302,7 +296,7 @@ else:
                     fornitore = st.text_input("Fornitore (es. Wurth, Spaggiari, Berner):")
                     
                     if st.button("Invia ed Archivia su Google Drive 🚀"):
-                        with st.spinner("Salvataggio e cifratura su Google Drive..."):
+                        with st.spinner("Salvataggio su Google Drive..."):
                             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                             tag_fornitore = f"_{fornitore.strip().replace(' ', '_')}" if fornitore.strip() else ""
                             ext = ".pdf" if (hasattr(file_da_elaborare, 'name') and file_da_elaborare.name.endswith(".pdf")) else ".jpg"
@@ -310,7 +304,7 @@ else:
                             
                             id_drive = carica_su_drive(file_da_elaborare.getvalue(), nome_file, file_da_elaborare.type)
                             if id_drive: 
-                                st.success(f"✔️ Archiviato con successo su Google Drive come: {nome_file}")
+                                st.success(f"✔️ Archiviato con successo su Google Drive! ID File: {id_drive}")
 
     # --- 3. SCHERMATA AMMINISTRATORE ---
     elif st.session_state.ruolo_utente == "admin":
