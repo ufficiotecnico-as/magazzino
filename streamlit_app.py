@@ -62,35 +62,47 @@ else:
         st.session_state.utente_corrente = ""
         st.rerun()
         
-    # --- 1. AREA COLLABORATORE (Solo richieste) ---
+    # --- 1. AREA COLLABORATORE (Con opzione "Altro") ---
     if st.session_state.ruolo_utente == "collaboratore":
         st.title(f"👋 Nuova Richiesta - {st.session_state.utente_corrente}")
         
+        # Prepariamo la lista articoli aggiungendo l'opzione "Altro..." in fondo
         lista_articoli = st.session_state.db_inventario["nome_articolo"].tolist()
-        articolo = st.selectbox("Seleziona l'articolo da richiedere:", lista_articoli)
+        lista_articoli.append("Altro... (Materiale non in elenco o esaurito)")
+        
+        articolo_selezionato = st.selectbox("Seleziona l'articolo da richiedere:", lista_articoli)
+        
+        # Se seleziona "Altro...", mostriamo il campo di testo libero per scrivere a mano
+        if articolo_selezionato == "Altro... (Materiale non in elenco o esaurito)":
+            articolo_finale = st.text_input("Specifica il materiale richiesto:")
+        else:
+            articolo_finale = articolo_selezionato
+            
         qta = st.number_input("Quantità necessaria:", min_value=1, step=1)
         
         if st.button("Invia Richiesta al Magazzino", use_container_width=True):
-            nuovo_id = int(st.session_state.db_richieste["id_richiesta"].max()) + 1 if not st.session_state.db_richieste.empty else 1
-            nuova_richiesta = pd.DataFrame([{
-                "id_richiesta": nuovo_id,
-                "collaboratore": st.session_state.utente_corrente,
-                "articolo": articolo,
-                "quantita": int(qta),
-                "stato": "In attesa",
-                "data_richiesta": datetime.now().strftime("%d/%m/%Y %H:%M"),
-                "data_consegna": ""
-            }])
-            st.session_state.db_richieste = pd.concat([st.session_state.db_richieste, nuova_richiesta], ignore_index=True)
-            st.success("Richiesta inviata!")
+            if not articolo_finale.strip():
+                st.error("⚠️ Specifica il nome del materiale prima di inviare.")
+            else:
+                nuovo_id = int(st.session_state.db_richieste["id_richiesta"].max()) + 1 if not st.session_state.db_richieste.empty else 1
+                nuova_richiesta = pd.DataFrame([{
+                    "id_richiesta": nuovo_id,
+                    "collaboratore": st.session_state.utente_corrente,
+                    "articolo": articolo_finale.strip(),
+                    "quantita": int(qta),
+                    "stato": "In attesa",
+                    "data_richiesta": datetime.now().strftime("%d/%m/%Y %H:%M"),
+                    "data_consegna": ""
+                }])
+                st.session_state.db_richieste = pd.concat([st.session_state.db_richieste, nuova_richiesta], ignore_index=True)
+                st.success(f"Richiesta per '{articolo_finale}' inviata con successo!")
 
-    # --- 2. AREA MAGAZZINIERE (Consegne + Carico Giacenze iniziale/rifornimento) ---
+    # --- 2. AREA MAGAZZINIERE ---
     elif st.session_state.ruolo_utente == "magazziniere":
         st.title("🚚 Pannello Gestione Magazziniere")
         
         tab_consegne, tab_carico = st.tabs(["📋 Gestisci Richieste (Scarico)", "➕ Carica Nuove Giacenze / Inventario"])
         
-        # SOTTO-PANNELLO 1: Gestioni consegne operative
         with tab_consegne:
             st.subheader("Richieste in attesa dai collaboratori")
             in_attesa = st.session_state.db_richieste[st.session_state.db_richieste["stato"] == "In attesa"]
@@ -104,22 +116,27 @@ else:
                         if st.button("Consegna Materiale ✔", key=f"cons_{row['id_richiesta']}", use_container_width=True):
                             art = row['articolo']
                             qta_req = int(row['quantita'])
-                            giacenza = int(st.session_state.db_inventario.loc[st.session_state.db_inventario["nome_articolo"] == art, "giacenza_totale"].values[0])
                             
-                            if giacenza >= qta_req:
-                                st.session_state.db_richieste.loc[st.session_state.db_richieste["id_richiesta"] == row["id_richiesta"], "stato"] = "Consegnato"
-                                st.session_state.db_richieste.loc[st.session_state.db_richieste["id_richiesta"] == row["id_richiesta"], "data_consegna"] = datetime.now().strftime("%d/%m/%Y %H:%M")
-                                st.session_state.db_inventario.loc[st.session_state.db_inventario["nome_articolo"] == art, "giacenza_totale"] = giacenza - qta_req
-                                st.success("Consegna registrata!")
-                                st.rerun()
-                            else:
-                                st.error(f"Giacenza insufficiente! Disponibili in magazzino: {giacenza}")
+                            # Controllo di sicurezza: verifichiamo se l'articolo esiste nell'inventario ufficiale
+                            filtro_art = st.session_state.db_inventario["nome_articolo"] == art
+                            if filtro_art.any():
+                                giacenza = int(st.session_state.db_inventario.loc[filtro_art, "giacenza_totale"].values[0])
                                 
-        # SOTTO-PANNELLO 2: Carico materiale (Funziona sia all'inizio che per i rifornimenti)
+                                if giacenza >= qta_req:
+                                    st.session_state.db_richieste.loc[st.session_state.db_richieste["id_richiesta"] == row["id_richiesta"], "stato"] = "Consegnato"
+                                    st.session_state.db_richieste.loc[st.session_state.db_richieste["id_richiesta"] == row["id_richiesta"], "data_consegna"] = datetime.now().strftime("%d/%m/%Y %H:%M")
+                                    st.session_state.db_inventario.loc[filtro_art, "giacenza_totale"] = giacenza - qta_req
+                                    st.success("Consegna registrata!")
+                                    st.rerun()
+                                else:
+                                    st.error(f"Giacenza insufficiente! Disponibili in magazzino: {giacenza}")
+                            else:
+                                # Se l'articolo è stato scritto a mano come "Altro", avvisiamo il magazziniere che deve prima censirlo nel Tab 2
+                                st.error(f"⚠️ L'articolo '{art}' non è presente nell'inventario. Vai nella scheda 'Carica Nuove Giacenze' per registrarlo e inserire i pezzi prima di consegnarlo.")
+                                
         with tab_carico:
             st.subheader("Aggiorna o Inserisci materiale in Giacenza")
             
-            # 1. Modifica articoli esistenti
             st.write("🔧 **Aggiungi pezzi ad articoli esistenti:**")
             art_da_caricare = st.selectbox("Seleziona l'articolo da rifornire:", st.session_state.db_inventario["nome_articolo"].tolist())
             qta_da_aggiungere = st.number_input("Quantità da aggiungere al magazzino:", min_value=1, step=1, key="add_qta")
@@ -132,14 +149,13 @@ else:
                 
             st.markdown("---")
             
-            # 2. Creazione nuovo articolo (Se all'inizio l'elenco è vuoto o inserisci un nuovo tipo di prodotto)
-            st.write("✨ **Inserisci un NUOVO articolo mai registrato prima:**")
+            st.write("✨ **Inserisci un NUOVO articolo nel sistema (usalo anche per censire le richieste registrate come 'Altro'):**")
             nuovo_id_art = st.text_input("Codice Articolo (es. A004):")
             nuovo_nome_art = st.text_input("Nome del nuovo materiale:")
             nuovo_stock_art = st.number_input("Giacenza iniziale inserita:", min_value=0, step=1)
             
             if st.button("Registra Nuovo Articolo nel Sistema"):
-                if not nuovo_id_art.strip() or not nuevo_nome_art.strip():
+                if not nuovo_id_art.strip() or not nuovo_nome_art.strip():
                     st.error("Compila tutti i campi per creare l'articolo.")
                 else:
                     nuovo_prodotto = pd.DataFrame([{"id_articolo": nuovo_id_art, "nome_articolo": nuovo_nome_art, "giacenza_totale": int(nuovo_stock_art)}])
@@ -147,7 +163,7 @@ else:
                     st.success(f"Articolo {nuovo_nome_art} inserito correttamente in inventario!")
                     st.rerun()
 
-    # --- 3. AREA ADMIN (Report + Download Excel) ---
+    # --- 3. AREA ADMIN ---
     elif st.session_state.ruolo_utente == "admin":
         st.title("📊 Pannello Amministratore (Admin)")
         
