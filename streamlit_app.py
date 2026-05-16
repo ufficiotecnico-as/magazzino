@@ -57,7 +57,7 @@ def carica_su_drive(file_bytes, nome_file, mime_type, nome_magazzino):
                 'google_credentials.json', scopes=['https://www.googleapis.com/auth/drive']
             )
         else:
-            st.error("❌ Credenziali di Google non trovate.")
+            st.error("❌ Credenziali di Google non trovate nei Secrets.")
             return None
 
         service = build('drive', 'v3', credentials=creds)
@@ -78,6 +78,7 @@ def carica_su_drive(file_bytes, nome_file, mime_type, nome_magazzino):
             cartella_creata = service.files().create(body=meta_cartella, fields='id', supportsAllDrives=True).execute()
             id_cartella_destinazione = cartella_creata.get('id')
 
+        # Configurazione metadati con supporto per caricamento su cartelle condivise (Risolve l'errore quota)
         file_metadata = {
             'name': nome_file, 
             'parents': [id_cartella_destinazione]
@@ -275,7 +276,6 @@ else:
             with st.container():
                 st.markdown("### 🔧 Registra Nuovo Articolo")
                 
-                # FIX PER SMARTPHONE: Usiamo il caricatore file che attiva direttamente la fotocamera del telefono in modalità nativa (senza bug iframe)
                 codice_scansionato = ""
                 st.markdown("#### 📷 Scansiona Codice a Barre")
                 foto_barcode = st.file_uploader("Fai una foto al codice a barre o carica un'immagine", type=["png", "jpg", "jpeg"], key="barcode_uploader")
@@ -294,7 +294,7 @@ else:
                 nuovo_stock_art = st.number_input("Stock iniziale inserito:", min_value=0, step=1)
                 
                 if st.button("Salva Nuovo Articolo"):
-                    if not nuovo_id_art.strip() or not नया_नाम := nuovo_nome_art.strip():
+                    if not nuovo_id_art.strip() or not nuovo_nome_art.strip():
                         st.error("Compila tutti i campi dell'articolo.")
                     else:
                         nuovo_p = pd.DataFrame([{"magazzino": mag_corrente, "id_articolo": nuovo_id_art.strip(), "nome_articolo": nuovo_nome_art.strip(), "giacenza_totale": int(nuovo_stock_art)}])
@@ -328,7 +328,6 @@ else:
         with tab_ddt:
             st.markdown(f"### 📸 Archiviazione DDT - Sottocartella: DDT_{mag_corrente.replace(' ', '_')}")
             with st.container():
-                # FIX ANCHE PER I DDT: Sostituito st.camera_input con file_uploader che su smartphone sblocca la fotocamera di sistema in modo stabile
                 file_ddt = st.file_uploader("Scatta una foto al DDT o seleziona un file", type=["png", "jpg", "jpeg", "pdf"], key="ddt_uploader")
                 
                 if file_ddt is not None:
@@ -396,7 +395,7 @@ else:
                                 else:
                                     nuovo_id_generato = f"NEW_{row['id_acquisto']}"
                                     nuovo_item = pd.DataFrame([{
-                                        "magazzino": row["magazzino"], "id_articolo": nuevo_id_generato, 
+                                        "magazzino": row["magazzino"], "id_articolo": nuovo_id_generato, 
                                         "nome_articolo": row["articolo"], "giacenza_totale": int(row["quantita_richiesta"])
                                     }])
                                     st.session_state.db_inventario = pd.concat([st.session_state.db_inventario, nuovo_item], ignore_index=True)
