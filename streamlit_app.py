@@ -111,7 +111,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# INIZIALIZZAZIONE DATABASE CON APPROVVIGIONAMENTI
+# INIZIALIZZAZIONE DATABASE
 # ==========================================
 if "db_inventario" not in st.session_state:
     st.session_state.db_inventario = pd.DataFrame([
@@ -123,7 +123,6 @@ if "db_inventario" not in st.session_state:
 if "db_richieste" not in st.session_state:
     st.session_state.db_richieste = pd.DataFrame(columns=["id_richiesta", "magazzino", "collaboratore", "articolo", "quantita", "stato", "data_richiesta", "data_consegna"])
 
-# Database per le richieste interne di acquisto generate dai magazzinieri verso l'Admin
 if "db_approvvigionamenti" not in st.session_state:
     st.session_state.db_approvvigionamenti = pd.DataFrame(columns=["id_acquisto", "magazzino", "articolo", "quantita_richiesta", "stato", "data_richiesta"])
 
@@ -146,7 +145,7 @@ if st.session_state.ruolo_utente is None:
             scelta_accesso = st.radio("", ["Sono un Collaboratore (Fai una Richiesta)", "Sono un Magazziniere / Admin"], label_visibility="collapsed")
             st.markdown("<br>", unsafe_allow_html=True)
             
-            if choix_accesso := scelta_accesso == "Sono un Collaboratore (Fai una Richiesta)":
+            if scelta_accesso == "Sono un Collaboratore (Fai una Richiesta)":
                 nome_input = st.text_input("Inserisci il tuo Nome e Cognome:")
                 if st.button("Accedi all'area Richieste"):
                     if not nome_input.strip():
@@ -255,7 +254,7 @@ else:
                                     else: 
                                         st.error(f"❌ Stock insufficiente! Disponibili solo {giacenza} pezzi.")
                                 else: 
-                                    st.error("⚠️ Questo è un articolo personalizzato. Censiscilo nell'inventario prima di consegnarlo.")
+                                    st.error("⚠️ Articolo personalizzato. Censiscilo in inventario prima di consegnarlo.")
 
         with tab_carico:
             articoli_miei = df_inventario[df_inventario["magazzino"] == mag_corrente]["nome_articolo"].tolist()
@@ -274,38 +273,35 @@ else:
                     st.write("Nessun articolo registrato in questo magazzino.")
             
             with st.container():
-                st.markdown("### 🔧 Registra Nuovo Articolo con Lettore Codice a Barre")
+                st.markdown("### 🔧 Registra Nuovo Articolo")
                 
-                # Sotto-sezione di Scansione Ottica Hardware
+                # FIX PER SMARTPHONE: Usiamo il caricatore file che attiva direttamente la fotocamera del telefono in modalità nativa (senza bug iframe)
                 codice_scansionato = ""
-                st.markdown("#### 📷 Scannerizza il codice a barre della scatola")
-                foto_barcode = st.camera_input("Inquadra il codice a barre nitidamente", key="barcode_scanner")
+                st.markdown("#### 📷 Scansiona Codice a Barre")
+                foto_barcode = st.file_uploader("Fai una foto al codice a barre o carica un'immagine", type=["png", "jpg", "jpeg"], key="barcode_uploader")
                 
                 if foto_barcode is not None and BARCODE_AVAILABLE:
                     img = Image.open(foto_barcode)
                     codici_rilevati = decode(img)
                     if codici_rilevati:
                         codice_scansionato = codici_rilevati[0].data.decode('utf-8')
-                        st.success(f"🎉 Codice a barre rilevato: **{codice_scansionato}**")
+                        st.success(f"🎉 Codice rilevato con successo: **{codice_scansionato}**")
                     else:
-                        st.warning("🔎 Foto acquisita, ma nessun codice a barre rilevato. Riprova tenendo la camera più ferma.")
-                elif foto_barcode is not None and not BARCODE_AVAILABLE:
-                    st.info("La libreria pyzbar non è compilata nell'ambiente Cloud. Inserisci il codice a mano qui sotto.")
+                        st.warning("🔎 Immagine caricata, ma nessun codice a barre leggibile trovato. Inseriscilo manualmente qui sotto.")
 
-                nuovo_id_art = st.text_input("Codice Articolo / Barcode:", value=codice_scansionato)
+                nuovo_id_art = st.text_input("Codice Articolo / Barcode rilevato:", value=codice_scansionato)
                 nuovo_nome_art = st.text_input("Nome del nuovo materiale:")
                 nuovo_stock_art = st.number_input("Stock iniziale inserito:", min_value=0, step=1)
                 
                 if st.button("Salva Nuovo Articolo"):
-                    if not nuovo_id_art.strip() or not nuovo_nome_art.strip():
+                    if not nuovo_id_art.strip() or not नया_नाम := nuovo_nome_art.strip():
                         st.error("Compila tutti i campi dell'articolo.")
                     else:
-                        nuovo_p = pd.DataFrame([{"magazzino": mag_corrente, "id_articolo": nuovo_id_art.strip(), "nome_articolo": nuevo_nome_art.strip(), "giacenza_totale": int(nuovo_stock_art)}])
+                        nuovo_p = pd.DataFrame([{"magazzino": mag_corrente, "id_articolo": nuovo_id_art.strip(), "nome_articolo": nuovo_nome_art.strip(), "giacenza_totale": int(nuovo_stock_art)}])
                         st.session_state.db_inventario = pd.concat([df_inventario, nuovo_p], ignore_index=True)
                         st.success("✔️ Articolo inserito nel tuo magazzino!")
                         st.rerun()
 
-        # NUOVO TAB: IL MAGAZZINIERE CHIEDE MATERIALE ALL'ADMIN
         with tab_rifornisci:
             st.markdown("### 🛒 Invia una richiesta di acquisto o riassortimento all'Admin")
             with st.container():
@@ -332,21 +328,21 @@ else:
         with tab_ddt:
             st.markdown(f"### 📸 Archiviazione DDT - Sottocartella: DDT_{mag_corrente.replace(' ', '_')}")
             with st.container():
-                foto_ddt = st.camera_input("Inquadra e scatta il foglio cartaceo del DDT")
-                file_ddt = st.file_uploader("Oppure seleziona file", type=["png", "jpg", "jpeg", "pdf"])
-                file_da_elaborare = foto_ddt if foto_ddt is not None else file_ddt
+                # FIX ANCHE PER I DDT: Sostituito st.camera_input con file_uploader che su smartphone sblocca la fotocamera di sistema in modo stabile
+                file_ddt = st.file_uploader("Scatta una foto al DDT o seleziona un file", type=["png", "jpg", "jpeg", "pdf"], key="ddt_uploader")
                 
-                if file_da_elaborare is not None:
-                    st.image(file_da_elaborare, caption="Anteprima", width=250)
+                if file_ddt is not None:
+                    if not file_ddt.name.endswith(".pdf"):
+                        st.image(file_ddt, caption="Anteprima documento", width=250)
                     fornitore = st.text_input("Fornitore:")
                     if st.button("Invia ed Archivia su Google Drive 🚀"):
                         with st.spinner("Salvataggio in corso..."):
                             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                             tag_fornitore = f"_{fornitore.strip().replace(' ', '_')}" if fornitore.strip() else ""
-                            ext = ".pdf" if (hasattr(file_da_elaborare, 'name') and file_da_elaborare.name.endswith(".pdf")) else ".jpg"
+                            ext = ".pdf" if file_ddt.name.endswith(".pdf") else ".jpg"
                             nome_file = f"DDT_{mag_corrente.replace(' ', '_')}{tag_fornitore}_{timestamp}{ext}"
                             
-                            id_drive = carica_su_drive(file_da_elaborare.getvalue(), nome_file, file_da_elaborare.type, mag_corrente)
+                            id_drive = carica_su_drive(file_ddt.getvalue(), nome_file, file_ddt.type, mag_corrente)
                             if id_drive: 
                                 st.success(f"✔️ Archiviato sotto la cartella di {mag_corrente}!")
 
@@ -376,7 +372,6 @@ else:
             csv = df_req_visualizza.to_csv(index=False).encode('utf-8')
             st.download_button(label="📥 Esporta Questo Registro in Excel (CSV)", data=csv, file_name="report_globale_magazzini.csv", mime="text/csv")
 
-        # NUOVO TAB ADMIN: APPROVAZIONE RICHIESTE DEI MAGAZZINIERI
         with tab_admin_acquisti:
             st.markdown("### 🛒 Richieste di Approvvigionamento dai Magazzinieri")
             acquisti_pendenti = df_approv[df_approv["stato"] == "In attesa di approvazione Admin"]
@@ -393,21 +388,18 @@ else:
                             st.markdown(f"Articolo Richiesto: <span style='color:#b91c1c; font-weight:bold;'>{row['quantita_richiesta']}x {row['articolo']}</span>", unsafe_allow_html=True)
                         with c3:
                             if st.button("Approva ed Ordina ed Aggiorna Giacenza ✔", key=f"appr_{row['id_acquisto']}"):
-                                # 1. Cambia lo stato dell'acquisto in approvato
                                 st.session_state.db_approvvigionamenti.loc[st.session_state.db_approvvigionamenti["id_acquisto"] == row["id_acquisto"], "stato"] = "Approvato e Caricato"
                                 
-                                # 2. Incrementa automaticamente lo stock dell'articolo nel magazzino corrispondente
                                 filtro_inventario = (df_inventario["nome_articolo"] == row["articolo"]) & (df_inventario["magazzino"] == row["magazzino"])
                                 if filtro_inventario.any():
                                     st.session_state.db_inventario.loc[filtro_inventario, "giacenza_totale"] += int(row["quantita_richiesta"])
                                 else:
-                                    # Se l'articolo è totalmente nuovo per il sistema, lo inserisce da zero nel database
                                     nuovo_id_generato = f"NEW_{row['id_acquisto']}"
                                     nuovo_item = pd.DataFrame([{
-                                        "magazzino": row["magazzino"], "id_articolo": nuovo_id_generato, 
+                                        "magazzino": row["magazzino"], "id_articolo": nuevo_id_generato, 
                                         "nome_articolo": row["articolo"], "giacenza_totale": int(row["quantita_richiesta"])
                                     }])
                                     st.session_state.db_inventario = pd.concat([st.session_state.db_inventario, nuovo_item], ignore_index=True)
                                 
-                                st.success("Ordine Approvato! Lo stock è stato accreditato al magazzino.")
+                                st.success("Ordine Approvato! Lo stock è stato caricato nel magazzino.")
                                 st.rerun()
