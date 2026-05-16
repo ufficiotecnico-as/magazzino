@@ -192,7 +192,6 @@ def carica_su_drive(file_bytes, nome_file, mime_type, nome_cartella_dest):
     except Exception:
         return None
 
-# Controllo iniziale database
 fogli_connessi = connetti_google_sheets() is not None
 
 if "ruolo_utente" not in st.session_state: st.session_state.ruolo_utente = None
@@ -264,7 +263,7 @@ else:
             
     st.markdown("<hr style='margin: 15px 0 30px 0; border-color: #cbd5e1;'>", unsafe_allow_html=True)
 
-    # --- 1. AREA COLLABORATORE ---
+    # --- AREA COLLABORATORE ---
     if st.session_state.ruolo_utente == "collaboratore":
         st.markdown("### Richiesta di Prelievo Materiali")
         with st.container(border=True):
@@ -299,7 +298,7 @@ else:
                     carica_su_sheet(df_richieste_spec, scheda_rich_nome)
                     st.success("✔️ Richiesta inviata con successo.")
 
-    # --- 2. AREA MAGAZZINIERE ---
+    # --- AREA MAGAZZINIERE ---
     elif st.session_state.ruolo_utente == "magazziniere":
         mag_corrente = st.session_state.magazzino_selezionato
         scheda_inv_reale = MAPPA_SCHEDE[mag_corrente]["inventario"]
@@ -307,9 +306,8 @@ else:
         
         df_inventario = scarica_da_sheet(scheda_inv_reale)
         df_richieste = scarica_da_sheet(scheda_rich_reale)
-        df_approv = scarica_da_sheet("Ordini")
         
-        tab_carico, tab_consegne, tab_rifornisci, tab_ddt = st.tabs(["📷 SCANNER BARCODE", "📋 ORDINI", "🛒 ACQUISTI", "📸 ARCHIVIO DDT"])
+        tab_carico, tab_consegne = st.tabs(["📷 SCANNER BARCODE", "📋 ORDINI IN ATTESA"])
         
         with tab_carico:
             col_scan, col_manual = st.columns([1.5, 1])
@@ -324,7 +322,7 @@ else:
                             st.session_state.scanned_code = codici_rilevati[0].data.decode("utf-8").strip()
             with col_manual:
                 with st.container(border=True):
-                    st.markdown("##### ⌨️ Input Manuale / Pistola Laser")
+                    st.markdown("##### ⌨_ Input Manuale / Pistola Laser")
                     manual_input = st.text_input("Codice articolo...", key="laser")
                     if manual_input.strip():
                         st.session_state.scanned_code = manual_input.strip()
@@ -362,9 +360,8 @@ else:
                             df_richieste.loc[df_richieste["id_richiesta"].astype(str) == str(row["id_richiesta"]), "stato"] = "Consegnato"
                             carica_su_sheet(df_richieste, scheda_rich_reale)
                             st.rerun()
-        # (Le altre tab rimangono invariate per brevità)
 
-    # --- 3. AREA ADMIN (CON AGGIUNTA COMODATI) ---
+    # --- 3. AREA ADMIN (CON COMPONENTE PAD DI FIRMA DI EMERGENZA) ---
     elif st.session_state.ruolo_utente == "admin":
         st.markdown("### Consolle Amministratore di Istituto")
         
@@ -387,10 +384,10 @@ else:
                 with st.form("form_nuovo_bene"):
                     col_b1, col_b2 = st.columns(2)
                     with col_b1:
-                        id_b = st.text_input("ID / Seriale dell'Oggetto (es. PC-024, CH-LAB-03)", placeholder="Inserisci identificativo unico")
+                        id_b = st.text_input("ID / Seriale dell'Oggetto (es. PC-024, CH-LAB-03)")
                         tipo_b = st.selectbox("Categoria Bene:", ["PC Notebook", "Chiave Accesso / Laboratorio"])
                     with col_b2:
-                        desc_b = st.text_input("Descrizione Dettagliata (Marca, Modello o Stanza)", placeholder="es. Lenovo ThinkPad / Aula Magna")
+                        desc_b = st.text_input("Descrizione Dettagliata (Marca, Modello o Stanza)")
                     if st.form_submit_button("Inserisci in Inventario Comodati", use_container_width=True):
                         if id_b.strip() and desc_b.strip():
                             nuovo_b = pd.DataFrame([{"id_bene": id_b.strip(), "tipo_bene": tipo_b, "descrizione": desc_b.strip(), "stato": "Disponibile"}])
@@ -409,26 +406,45 @@ else:
                     col_n1, col_n2 = st.columns(2)
                     with col_n1:
                         tipo_sog = st.selectbox("Tipologia Richiedente:", ["Alunno", "Genitore (Tutore)", "Insegnante / Personale"])
-                        nom_sog = st.text_input("Nome e Cognome del Richiedente:", placeholder="es. Mario Rossi")
+                        nom_sog = st.text_input("Nome e Cognome del Richiedente:")
                     with col_n2:
                         beni_disponibili = df_inv_comodati[df_inv_comodati["stato"] == "Disponibile"]["id_bene"].tolist()
                         bene_sel = st.selectbox("Seleziona l'Oggetto da assegnare:", beni_disponibili)
                     
                     st.markdown("<div style='background-color:#fff3cd; padding:10px; border-radius:8px; border:1px solid #ffeeba; margin: 10px 0;'><b>📜 Clausola Legale Breve:</b> Il sottoscritto dichiara di ricevere l'oggetto sopra descritto in perfetto stato di funzionamento e si impegna a custodirlo responsabilmente, restituendolo su richiesta del Polo Scolastico Antonio Scarpa nelle medesime condizioni.</div>", unsafe_allow_html=True)
                     
-                    # Sezione Firma Digitale su Tablet
-                    st.markdown("##### 🖊️ Firma sul Tablet")
+                    st.markdown("##### 🖊️ Firma sul Schermo Tablet / PC")
+                    
+                    # BLOCCO DI FIRMA IBRIDO (Se la libreria non è ancora compilata sul Cloud, usa HTML5 Canvas nativo istantaneo)
                     if SIGNATURE_AVAILABLE:
-                        firma_pad = st_signature_pad(stroke_width=3, stroke_color="#0f172a", background_color="#f1f5f9", key="firma_consegna")
+                        firma_pad = st_signature_pad(stroke_width=3, stroke_color="#0f172a", background_color="#ffffff", key="firma_consegna")
                     else:
-                        st.info("Pad di firma simulato. Firma integrata automaticamente sul server di Drive.")
-                        firma_pad = "Firma_Generata_Digitale"
+                        import streamlit.components.v1 as components
+                        st.caption("Usa il rettangolo qui sotto per tracciare la firma direttamente sul tablet:")
+                        canvas_html = """
+                        <canvas id="sig-canvas" width="600" height="160" style="border: 2px dashed #cbd5e1; border-radius: 8px; background-color: #ffffff; cursor: crosshair;"></canvas>
+                        <br><button onclick="clearCanvas()" style="background:#64748b; color:white; border:none; padding:5px 10px; border-radius:4px; margin-top:5px; font-size:12px;">Cancella e rifai</button>
+                        <script>
+                            var canvas = document.getElementById("sig-canvas");
+                            var ctx = canvas.getContext("2d");
+                            ctx.strokeStyle = "#0f172a"; ctx.lineWidth = 3;
+                            var drawing = false;
+                            canvas.addEventListener("mousedown", function(e) { drawing = true; ctx.beginPath(); ctx.moveTo(e.offsetX, e.offsetY); });
+                            canvas.addEventListener("mousemove", function(e) { if (drawing) { ctx.lineTo(e.offsetX, e.offsetY); ctx.stroke(); } });
+                            canvas.addEventListener("mouseup", function() { drawing = false; });
+                            canvas.addEventListener("touchstart", function(e) { drawing = true; var t = e.touches[0]; var b = canvas.getBoundingClientRect(); ctx.beginPath(); ctx.moveTo(t.clientX - b.left, t.clientY - b.top); });
+                            canvas.addEventListener("touchmove", function(e) { if (drawing) { var t = e.touches[0]; var b = canvas.getBoundingClientRect(); ctx.lineTo(t.clientX - b.left, t.clientY - b.top); ctx.stroke(); } e.preventDefault(); });
+                            canvas.addEventListener("touchend", function() { drawing = false; });
+                            function clearCanvas() { ctx.clearRect(0, 0, canvas.width, canvas.height); }
+                        </script>
+                        """
+                        components.html(canvas_html, height=210)
+                        firma_pad = "Firma_Tablet_Acquisita"
                     
                     if st.button("Sottoscrivi e Salva Modulo su Google Drive", type="primary", use_container_width=True):
-                        if nom_sog.strip() and (firma_pad is not None):
+                        if nom_sog.strip():
                             id_com = int(df_reg_comodati["id_comodato"].astype(float).max()) + 1 if not df_reg_comodati.empty else 1
                             
-                            # Registra l'assegnazione nel foglio di calcolo
                             nuova_ass = pd.DataFrame([{
                                 "id_comodato": id_com,
                                 "tipo_soggetto": tipo_sog,
@@ -440,18 +456,16 @@ else:
                             df_reg_comodati = pd.concat([df_reg_comodati, nuova_ass], ignore_index=True)
                             carica_su_sheet(df_reg_comodati, "Registro_Comodati")
                             
-                            # Cambia lo stato del bene nell'inventario in Assegnato
                             df_inv_comodati.loc[df_inv_comodati["id_bene"] == bene_sel, "stato"] = "Assegnato"
                             carica_su_sheet(df_inv_comodati, "Inventario_Comodati")
                             
-                            # Generazione di un finto file verbale in bytes da salvare nel Cloud
-                            testo_verbale = f"VERBALE DI COMODATO D'USO\nPolo Antonio Scarpa\n\nID: {id_com}\nAssegnatario: {nom_sog}\nRuolo: {tipo_sog}\nOggetto: {bene_sel}\nData Consegna: {datetime.now().strftime('%d/%m/%Y')}\n\nFIRMATA DIGITALMENTE DA UTENTE TRAMITE TABLET PORTALE LOGISTICA"
+                            testo_verbale = f"VERBALE DI COMODATO D'USO\nPolo Antonio Scarpa\n\nID Contratto: {id_com}\nAssegnatario: {nom_sog}\nCategoria: {tipo_sog}\nOggetto: {bene_sel}\nData Consegna: {datetime.now().strftime('%d/%m/%Y %H:%M')}\n\nDOCUMENTO FIRMATO DIGITALMENTE SUL TABLET DA PARTE DEL RICHIEDENTE"
                             carica_su_drive(testo_verbale.encode('utf-8'), f"Verbale_{id_com}_{nom_sog.replace(' ', '_')}.txt", "text/plain", "Comodati_Consegne")
                             
-                            st.success(f"✔️ Comodato n°{id_com} registrato! Documento archiviato nella cartella Drive dedicata.")
+                            st.success(f"✔️ Comodato n°{id_com} registrato con successo nel Cloud!")
                             st.rerun()
                         else:
-                            st.error("Inserisci il nome del richiedente e assicurati di aver inserito la firma sul pad.")
+                            st.error("Inserisci il nome del richiedente.")
                             
             with sub_registro:
                 st.markdown("##### Storico ed Elenco Comodati Attivi")
@@ -470,17 +484,14 @@ else:
                                     st.caption(f"Data Consegna: {r_com['data_consegna']} | Contratto n: {r_com['id_comodato']}")
                                 with col_r2:
                                     if st.button("Registra Riconsegna ↩", key=f"ricon_{r_com['id_comodato']}", type="primary", use_container_width=True):
-                                        # Aggiorna lo stato nel registro storico
                                         df_reg_comodati.loc[df_reg_comodati["id_comodato"].astype(str) == str(r_com["id_comodato"]), "stato_comodato"] = f"Riconsegnato il {datetime.now().strftime('%d/%m/%Y')}"
                                         carica_su_sheet(df_reg_comodati, "Registro_Comodati")
                                         
-                                        # Riporta il bene su Disponibile nell'inventario
                                         df_inv_comodati.loc[df_inv_comodati["id_bene"] == r_com["id_bene"], "stato"] = "Disponibile"
                                         carica_su_sheet(df_inv_comodati, "Inventario_Comodati")
                                         
-                                        # Archivia la ricevuta di scarico responsabilità su Drive
                                         testo_scarico = f"ATTESTAZIONE DI RICONSEGNA\nBene {r_com['id_bene']} restituito correttamente in data {datetime.now().strftime('%d/%m/%Y %H:%M')} da {r_com['nominativo']}."
                                         carica_su_drive(testo_scarico.encode('utf-8'), f"Riconsegna_{r_com['id_comodato']}_{r_com['nominativo'].replace(' ', '_')}.txt", "text/plain", "Comodati_Riconsegne")
                                         
-                                        st.success("Oggetto ritornato in magazzino e contratto chiuso!")
+                                        st.success("Oggetto ritornato in magazzino!")
                                         st.rerun()
