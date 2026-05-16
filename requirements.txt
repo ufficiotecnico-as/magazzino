@@ -6,3 +6,4 @@ google-auth-oauthlib
 pillow
 pyzbar
 
+streamlit-barcode-scanner
