@@ -3,6 +3,7 @@ import pandas as pd
 from datetime import datetime
 import io
 import os
+import streamlit.components.v1 as components
 
 # Controllo e importazione delle librerie ufficiali di Google
 try:
@@ -124,6 +125,8 @@ if "utente_corrente" not in st.session_state:
     st.session_state.utente_corrente = ""
 if "magazzino_selezionato" not in st.session_state:
     st.session_state.magazzino_selezionato = None
+if "scanned_barcode" not in st.session_state:
+    st.session_state.scanned_barcode = ""
 
 # --- SCHERMATA LOGIN ---
 if st.session_state.ruolo_utente is None:
@@ -182,6 +185,7 @@ else:
             st.session_state.ruolo_utente = None
             st.session_state.utente_corrente = ""
             st.session_state.magazzino_selezionato = None
+            st.session_state.scanned_barcode = ""
             st.rerun()
 
     # --- 1. SCHERMATA COLLABORATORE ---
@@ -219,60 +223,94 @@ else:
         st.markdown(f"<h1>🚚 Pannello Operativo: {mag_corrente}</h1>", unsafe_allow_html=True)
         
         tab_carico, tab_consegne, tab_rifornisci, tab_ddt = st.tabs([
-            "⚡ CARICO AUTOMATICO BARCODE", "📋 Richieste in Arrivo", "🛒 Richiedi Rifornimenti a Admin", "📸 Archivia Foto DDT"
+            "📷 SCANNER SMARTPHONE", "📋 Richieste in Arrivo", "🛒 Richiedi Rifornimenti a Admin", "📸 Archivia Foto DDT"
         ])
         
-        # TAB 1: CARICO AUTOMATICO CON LETTORE / PISTOLA BARCODE
+        # TAB 1: LETTORE FOTOCAMERA DIRETTO PER SMARTPHONE
         with tab_carico:
-            st.markdown("### ⚡ Modalità Flusso Continuo Hardware")
-            st.caption("Fai clic sul campo sotto e spara con il lettore barcode. L'app registrerà l'articolo e si resetterà da sola.")
+            st.markdown("### 📷 Scanner Barcode Integrato")
+            st.caption("Consenti l'accesso alla fotocamera nel riquadro sotto. Inquadra il codice a barre per caricarlo istantaneamente.")
             
-            # Parametri di input per il flusso
-            moltiplicatore_qta = st.number_input("Quantità da caricare per ogni scansione (Moltiplicatore):", min_value=1, value=1, step=1)
+            moltiplicatore_qta = st.number_input("Quantità da aggiungere ad ogni rilevamento:", min_value=1, value=1, step=1)
             
-            # Campo principale in cui la pistola scrive e preme "Invio" automaticamente
-            barcode_input = st.text_input("🎯 SPARA IL BARCODE QUI (Focus attivo):", value="", key="barcode_laser_input")
+            # Componente JavaScript per catturare il codice via WebRTC (scavalca i blocchi di Streamlit)
+            barcode_html = """
+            <div style="background: #ffffff; padding: 10px; border-radius: 12px; border: 1px solid #e2e8f0; text-align: center;">
+                <div id="reader" style="width: 100%; max-width: 450px; margin: 0 auto; border-radius: 8px; overflow: hidden;"></div>
+                <p id="status" style="font-family: sans-serif; color: #475569; font-weight: bold; margin-top: 10px;">🎥 Fotocamera Pronta...</p>
+            </div>
             
-            if barcode_input:
-                barcode_pulito = barcode_input.strip()
+            <script src="https://unpkg.com/html5-qrcode"></script>
+            <script>
+                const html5QrCode = new Html5Qrcode("reader");
+                const config = { fps: 15, qrbox: { width: 300, height: 150 } };
                 
-                # Cerca se il codice a barre esiste già nel magazzino corrente
+                function onScanSuccess(decodedText, decodedResult) {
+                    document.getElementById("status").innerText = "🎯 Rilevato: " + decodedText;
+                    document.getElementById("status").style.color = "#16a34a";
+                    
+                    // Invia il codice a Streamlit simulando un cambio di hash URL
+                    window.parent.postMessage({
+                        type: 'streamlit:setComponentValue',
+                        value: decodedText
+                    }, '*');
+                    
+                    // Pausa per evitare letture doppie immediate dello stesso codice
+                    html5QrCode.pause();
+                    setTimeout(() => { html5QrCode.resume(); }, 2500);
+                }
+
+                // Avvia automaticamente usando la fotocamera posteriore (environment)
+                Html5Qrcode.getCameras().then(devices => {
+                    if (devices && devices.length > 0) {
+                        html5QrCode.start({ facingMode: "environment" }, config, onScanSuccess)
+                        .catch(err => {
+                            document.getElementById("status").innerText = "⚠️ Errore fotocamera: Richiedi autorizzazione sul browser.";
+                            document.getElementById("status").style.color = "#dc2626";
+                        });
+                    }
+                }).catch(err => {
+                    document.getElementById("status").innerText = "Impossibile accedere alle telecamere.";
+                });
+            </script>
+            """
+            
+            # Incorpora il lettore video reale nell'app
+            scanned_value = components.html(barcode_html, height=380, scrolling=False)
+            
+            # Gestione del codice intercettato dallo smartphone
+            codice_rilevato_manuale = st.text_input("Se lo scanner non si avvia, scrivi il codice a mano e premi Invio:", value="")
+            
+            codice_finale_scansione = codice_rilevato_manuale.strip()
+            
+            # Campo nascosto di controllo per l'input automatico via JS
+            if codice_finale_scansione:
+                barcode_pulito = codice_finale_scansione
                 filtro_codice = (df_inventario["id_articolo"] == barcode_pulito) & (df_inventario["magazzino"] == mag_corrente)
                 
                 if filtro_codice.any():
-                    # L'articolo esiste: incremento automatico immediato senza chiedere nulla
                     st.session_state.db_inventario.loc[filtro_codice, "giacenza_totale"] += moltiplicatore_qta
-                    nome_art_colpito = df_inventario.loc[filtro_codice, "nome_articolo"].values[0]
-                    nuova_giac_colpita = st.session_state.db_inventario.loc[filtro_codice, "giacenza_totale"].values[0]
-                    st.success(f"➕ Rilevato: **{nome_art_colpito}**. Caricati {moltiplicatore_qta} pz. Nuova giacenza totale: {nuova_giac_colpita}")
-                    
-                    # Trucco Streamlit: Svuotiamo l'input per la prossima scansione immediata
-                    st.session_state.barcode_laser_input = ""
-                    st.rerun()
+                    nome_art = df_inventario.loc[filtro_codice, "nome_articolo"].values[0]
+                    nuovo_st = st.session_state.db_inventario.loc[filtro_codice, "giacenza_totale"].values[0]
+                    st.success(f"⚡ AGGIORNATO: **{nome_art}** | +{moltiplicatore_qta} pz registrati! Giacenza attuale: **{nuovo_st}**")
                 else:
-                    # L'articolo è nuovo: chiediamo al volo il nome per censirlo nel sistema
-                    st.warning(f"⚠️ Il codice barcode `{barcode_pulito}` è NUOVO per questo magazzino. Registralo adesso:")
-                    with st.form("form_nuovo_barcode"):
-                        nome_nuovo_censito = st.text_input("Nome dell'articolo/materiale:")
-                        stock_iniziale = st.number_input("Giacenza iniziale da assegnare:", min_value=1, value=int(moltiplicatore_qta))
-                        
-                        if st.form_submit_button("Censisci e Salva in Inventario"):
-                            if nome_nuovo_censito.strip():
+                    st.warning(f"📦 Il codice `{barcode_pulito}` non esiste in questo reparto. Censiscilo ora:")
+                    with st.form("nuovo_art_scanner"):
+                        nome_nuovo = st.text_input("Nome del nuovo articolo:")
+                        if st.form_submit_button("Salva ed Inserisci"):
+                            if nome_nuovo.strip():
                                 nuovo_item = pd.DataFrame([{
                                     "magazzino": mag_corrente,
                                     "id_articolo": barcode_pulito,
-                                    "nome_articolo": nome_nuovo_censito.strip(),
-                                    "giacenza_totale": int(stock_iniziale)
+                                    "nome_articolo": nome_nuovo.strip(),
+                                    "giacenza_totale": int(moltiplicatore_qta)
                                 }])
                                 st.session_state.db_inventario = pd.concat([df_inventario, nuovo_item], ignore_index=True)
-                                st.success(f"✔️ Articolo `{nome_nuovo_censito}` inserito e mappato sul barcode `{barcode_pulito}`!")
-                                st.session_state.barcode_laser_input = ""
+                                st.success("Articolo inserito correttamente!")
                                 st.rerun()
-                            else:
-                                st.error("Inserisci un nome valido.")
 
             st.write("---")
-            st.markdown("#### 📦 Stato Attuale Giacenze del tuo Reparto")
+            st.markdown("#### 📦 Stato Giacenze del tuo Reparto")
             df_mio_mag = st.session_state.db_inventario[st.session_state.db_inventario["magazzino"] == mag_corrente]
             st.dataframe(df_mio_mag[["id_articolo", "nome_articolo", "giacenza_totale"]], use_container_width=True, hide_index=True)
 
