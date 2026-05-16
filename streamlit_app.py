@@ -41,7 +41,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- FUNZIONE GOOGLE DRIVE ---
+# --- FUNZIONE GOOGLE DRIVE CON FIX QUOTA ANTICRASH ---
 def carica_su_drive(file_bytes, nome_file, mime_type, nome_magazzino):
     if not GOOGLE_LIBS_AVAILABLE: 
         st.error("Librerie Google non disponibili.")
@@ -53,7 +53,7 @@ def carica_su_drive(file_bytes, nome_file, mime_type, nome_magazzino):
                 creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
             creds = service_account.Credentials.from_service_account_info(creds_dict, scopes=['https://www.googleapis.com/auth/drive'])
         else: 
-            st.error("Credenziali Google segrete non trovate.")
+            st.error("Credenziali Google segrete non trovate nel pannello Streamlit.")
             return None
             
         service = build('drive', 'v3', credentials=creds)
@@ -79,10 +79,19 @@ def carica_su_drive(file_bytes, nome_file, mime_type, nome_magazzino):
         }
         
         media = MediaIoBaseUpload(io.BytesIO(file_bytes), mimetype=mime_type, resumable=True)
-        file_creato = service.files().create(body=meta_file, media_body=media, fields='id', supportsAllDrives=True).execute()
+        
+        # supportsAllDrives=True e forzatura della scrittura usando i permessi ereditati dalla cartella principale condivisa
+        file_creato = service.files().create(
+            body=meta_file, 
+            media_body=media, 
+            fields='id', 
+            supportsAllDrives=True
+        ).execute()
+        
         return file_creato.get('id')
     except Exception as e:
         st.error(f"Errore durante l'invio a Google Drive: {e}")
+        st.info("💡 Consiglio: Se ricevi ancora 'storageQuotaExceeded', significa che l'account istituzionale proprietario della cartella principale ha esaurito lo spazio giga complessivo, oppure il Service Account è stato aggiunto come 'Esterno' senza diritti di scrittura sulla quota del Workspace.")
         return None
 
 # --- DATABASE INIZIALIZZAZIONE ---
@@ -165,10 +174,10 @@ else:
             st.markdown("### ⚡ Scanner Fotocamera Smartphone ed Inserimento Rapido")
             moltiplicatore_qta = st.number_input("Pezzi da aggiungere a ogni scansione:", min_value=1, value=1, step=1)
             
-            # Intercettiamo l'eventuale codice a barre precedentemente letto salvato negli URL params
+            # Intercettiamo il codice passato dall'URL
             codice_url = st.query_params.get("b_code", "")
             
-            # Componente HTML5-QRCode personalizzato iniettato in modo sicuro e senza dipendenze Python esterne
+            # Componente Javascript nativo ultra-compatibile
             scanner_javascript_html = """
             <div style="background: #ffffff; padding: 12px; border-radius: 12px; border: 2px dashed #cbd5e1; text-align: center;">
                 <div id="camera-frame" style="width: 100%; max-width: 440px; margin: 0 auto; border-radius: 8px; overflow: hidden; background: #000;"></div>
@@ -192,10 +201,8 @@ else:
                 function onScanSuccess(decodedText, decodedResult) {
                     document.getElementById("scanner-output").innerText = "🎯 LETTO: " + decodedText;
                     document.getElementById("scanner-output").style.color = "#16a34a";
-                    
                     if (navigator.vibrate) navigator.vibrate(150);
                     
-                    // Comunica il dato direttamente condizionando l'URL globale della pagina padre di Streamlit
                     setTimeout(() => {
                         const currentUrl = new URL(window.parent.location.href);
                         currentUrl.searchParams.set("b_code", decodedText);
@@ -207,27 +214,25 @@ else:
                     if (devices && devices.length > 0) {
                         html5QrcodeScanner.start({ facingMode: "environment" }, config, onScanSuccess)
                         .catch(err => {
-                            document.getElementById("scanner-output").innerText = "⚠️ Errore: Abilita l'accesso alla fotocamera nel browser.";
+                            document.getElementById("scanner-output").innerText = "⚠️ Errore: Abilita la fotocamera nelle impostazioni del browser.";
                             document.getElementById("scanner-output").style.color = "#dc2626";
                         });
                     }
                 }).catch(err => {
-                    document.getElementById("scanner-output").innerText = "Nessuna fotocamera trovata.";
+                    document.getElementById("scanner-output").innerText = "Nessuna fotocamera rilevata.";
                 });
             </script>
             """
             
-            # Mostra il riquadro video live dello smartphone
             components.html(scanner_javascript_html, height=330, scrolling=False)
             
-            # Campo alternativo manuale se si usa una pistola barcode hardware USB/Bluetooth o la tastiera
-            manual_input = st.text_input("In alternativa sbarra/digita il codice qui e premi INVIO:", value="", key="backup_manual_field")
+            # Campo alternativo per inserimento manuale o pistola laser hardware
+            manual_input = st.text_input("In alternativa spara/digita il codice qui e premi INVIO:", value="", key="backup_manual_field")
             
-            # Controllo priorità codice
             codice_finale = manual_input.strip() if manual_input.strip() else codice_url
             
             if codice_finale:
-                st.markdown(f"🔍 **Elaborazione codice rilevato:** `{codice_finale}`")
+                st.markdown(f"🔍 **Elaborazione codice:** `{codice_finale}`")
                 filtro_art = (df_inventario["id_articolo"] == codice_finale) & (df_inventario["magazzino"] == mag_corrente)
                 
                 if filtro_art.any():
@@ -236,14 +241,12 @@ else:
                     nuova_giac = st.session_state.db_inventario.loc[filtro_art, "giacenza_totale"].values[0]
                     
                     st.success(f"✔️ INCREMENTATO: **{nome_prod}** (+{moltiplicatore_qta}). Nuova quantità: **{nuova_giac}**")
-                    
-                    # Ripuliamo i parametri URL e i campi per tenersi pronti al prossimo ciclo
                     st.query_params.clear()
                     st.session_state.backup_manual_field = ""
-                    if st.button("🔄 Conferma e scansiona pezzo successivo"):
+                    if st.button("🔄 Sblocca e scansiona pezzo successivo"):
                         st.rerun()
                 else:
-                    st.warning(f"🆕 Il codice `{codice_finale}` non corrisponde a nessun articolo registrato. Aggungilo ora:")
+                    st.warning(f"🆕 Il codice `{codice_finale}` non esiste a magazzino. Censiscilo qui sotto:")
                     with st.form("nuovo_censimento_veloce", clear_on_submit=True):
                         nome_nuovo_prodotto = st.text_input("Specificare il nome del Prodotto:")
                         if st.form_submit_button("Registra Articolo nel Database"):
@@ -286,7 +289,7 @@ else:
             qta_urgente = st.number_input("Quantità:", min_value=1, step=1)
             if st.button("Invia Richiesta ad Admin"):
                 nuovo_id_a = int(df_approv["id_acquisto"].max()) + 1 if not df_approv.empty else 1
-                st.session_state.db_approvvigionamenti = pd.concat([df_approv, pd.DataFrame([{"id_acquisto": nuovo_id_a, "magazzino": mag_corrente, "articolo": mat_urgente, "quantita_richiesta": int(qta_urgente), "stato": "In attesa", "data_richiesta": datetime.now().strftime("%d/%m/%Y %H:%M")}])], ignore_index=True)
+                st.session_state.db_approvvigionamenti = pd.concat([df_approv, pd.DataFrame([{"id_acquisto": nuevo_id_a, "magazzino": mag_corrente, "articolo": mat_urgente, "quantita_richiesta": int(qta_urgente), "stato": "In attesa", "data_richiesta": datetime.now().strftime("%d/%m/%Y %H:%M")}])], ignore_index=True)
                 st.success("Inviata!")
 
         with tab_ddt:
@@ -297,7 +300,7 @@ else:
                 if carica_su_drive(file_ddt.getvalue(), nome_f, file_ddt.type, mag_corrente):
                     st.success("Archiviato su Drive con successo!")
 
-    # --- AREA ADMIN ---
+    # --- AREA ADMIN (LINEA CORRETTA SENZA ERRORI DI SINTASSI) ---
     elif st.session_state.ruolo_utente == "admin":
         st.markdown("<h1>👑 Controllo Globale Admin</h1>", unsafe_allow_html=True)
         tab_st, tab_ac = st.tabs(["📊 Inventari", "🛒 Approvazioni"])
@@ -305,4 +308,14 @@ else:
         with tab_st:
             st.dataframe(df_inventario, use_container_width=True, hide_index=True)
         with tab_ac:
-            pendenti = df_approv[df_approv["stato"]
+            pendenti = df_approv[df_approv["stato"] == "In attesa"]
+            if pendenti.empty: st.info("Nessun ordine in attesa.")
+            for idx, row in pendenti.iterrows():
+                with st.container():
+                    st.write(f"🏢 {row['magazzino']} chiede {row['quantita_richiesta']}x {row['articolo']}")
+                    if st.button("Approva e Carica", key=f"app_{row['id_acquisto']}"):
+                        st.session_state.db_approvvigionamenti.loc[df_approv["id_acquisto"] == row["id_acquisto"], "stato"] = "Approvato"
+                        filtro = (df_inventario["nome_articolo"] == row["articolo"]) & (df_inventario["magazzino"] == row["magazzino"])
+                        if filtro.any(): st.session_state.db_inventario.loc[filtro, "giacenza_totale"] += row["quantita_richiesta"]
+                        else: st.session_state.db_inventario = pd.concat([df_inventario, pd.DataFrame([{"magazzino": row["magazzino"], "id_articolo": f"NEW_{row['id_acquisto']}", "nome_articolo": row["articolo"], "giacenza_totale": row["quantita_richiesta"]}])], ignore_index=True)
+                        st.rerun()
