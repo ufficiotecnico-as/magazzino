@@ -169,7 +169,6 @@ def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione, 
     # Blocco Firme
     pdf.set_font("Arial", "B", 11)
     
-    # Forziamo la dicitura Ufficio Tecnico se loggati come admin
     firma_admin_testo = "Ufficio Tecnico" if str(utente_loggato).lower() in ["admin", "amministratore"] else str(utente_loggato)
     
     y_posizione_firme = pdf.get_y()
@@ -179,7 +178,7 @@ def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione, 
     pdf.set_font("Arial", "I", 10)
     pdf.cell(95, 8, f"F.to {firma_admin_testo}", align="L")
     
-    # Incolla la firma se presente ed elaborata
+    # Incolla la firma se presente
     if firma_array_np is not None:
         try:
             img = Image.fromarray(firma_array_np.astype('uint8'), 'RGBA')
@@ -236,7 +235,6 @@ if "magazzino_selezionato" not in st.session_state: st.session_state.magazzino_s
 if st.session_state.ruolo_utente is None:
     col_l, col_c, col_r = st.columns([1, 1.8, 1])
     with col_c:
-        # Corretto con use_container_width per prevenire il blocco ImageMixin
         st.image(URL_LOGO, use_container_width=True)
         st.markdown("<h2 style='text-align: center;'>Piattaforma Logistica di Istituto</h2>", unsafe_allow_html=True)
         with st.container(border=True):
@@ -270,7 +268,6 @@ else:
             st.session_state.ruolo_utente = None
             st.rerun()
             
-    # Sostituito use_width=True con use_container_width=True per rimuovere il crash
     st.image(URL_LOGO, use_container_width=True)
 
     # --- MAIN ADMIN INTERFACE ---
@@ -310,8 +307,9 @@ else:
                 else:
                     col_n1, col_n2 = st.columns(2)
                     with col_n1:
+                        # Inizializzazione corretta e protetta delle variabili di testo
                         tipo_sog = st.selectbox("Profilo Richiedente:", ["Alunno", "Genitore / Tutore", "Insegnante / Personale"])
-                        nom_sog = st.text_input("Nome e Cognome dell'Assegnatario:")
+                        nom_sog = st.text_input("Nome e Cognome dell'Assegnatario:", key="input_nome_assegnatario")
                     with col_n2:
                         disp = df_inv_comodati[df_inv_comodati["stato"] == "Disponibile"]["id_bene"].tolist()
                         bene_sel = st.selectbox("Seleziona l'oggetto da consegnare:", disp)
@@ -338,8 +336,11 @@ else:
                         firma_data_np = None
 
                     if st.button("✍️ Approva, Genera Verbale e Salva PDF su Google Drive", type="primary", use_container_width=True):
-                        if nom_sog.strip():
-                            # CONTROLLO FIRMA STRUTTURATO: Verifica se ci sono pixel tracciati sul canvas
+                        # Controllo di sicurezza: usiamo direttamente il valore del widget text_input
+                        nome_pulito = st.session_state.input_nome_assegnatario.strip()
+                        
+                        if nome_pulito:
+                            # CONTROLLO FIRMA STRUTTURATO
                             ha_firmato = False
                             if firma_data_np is not None:
                                 if np.any(firma_data_np[:, :, 3] > 0) and not np.all(firma_data_np[:, :, :3] == 255):
@@ -352,14 +353,14 @@ else:
                                     id_com = int(df_reg_comodati["id_comodato"].astype(float).max()) + 1 if not df_reg_comodati.empty else 1001
                                     data_ora = datetime.now().strftime("%d/%m/%Y %H:%M")
                                     
-                                    # Genera file PDF
-                                    pdf_output_bytes = genera_pdf_comodato(id_com, nom_sog.strip(), tipo_sog, bene_sel, data_ora, "CONSEGNA", firma_data_np, st.session_state.utente_corrente)
-                                    nome_file_pdf = f"Verbale_Consegna_{id_com}_{nom_sog.replace(' ', '_')}.pdf"
+                                    # Genera file PDF passando i parametri corretti e definiti
+                                    pdf_output_bytes = genera_pdf_comodato(id_com, nome_pulito, tipo_sog, bene_sel, data_ora, "CONSEGNA", firma_data_np, st.session_state.utente_corrente)
+                                    nome_file_pdf = f"Verbale_Consegna_{id_com}_{nome_pulito.replace(' ', '_')}.pdf"
                                     
                                     # Carica su Google Drive
                                     if carica_su_drive_unico(pdf_output_bytes, nome_file_pdf, "application/pdf", "Comodati_Consegne"):
                                         # Scrive sul Registro Cloud
-                                        nuova_r = pd.DataFrame([{"id_comodato": id_com, "tipo_soggetto": tipo_sog, "nominativo": nom_sog.strip(), "id_bene": bene_sel, "data_consegna": data_ora, "stato_comodato": "In Corso"}])
+                                        nuova_r = pd.DataFrame([{"id_comodato": id_com, "tipo_soggetto": tipo_sog, "nominativo": nome_pulito, "id_bene": bene_sel, "data_consegna": data_ora, "stato_comodato": "In Corso"}])
                                         df_reg_comodati = pd.concat([df_reg_comodati, nuova_r], ignore_index=True)
                                         carica_su_sheet(df_reg_comodati, "Registro_Comodati")
                                         
@@ -372,7 +373,7 @@ else:
                                     else:
                                         st.error("Impossibile caricare su Drive. Verifica le credenziali cloud.")
                         else:
-                            st.error("Inserisci il nome completo dell'assegnatario.")
+                            st.error("Inserisci il nome completo dell'assegnatario prima di procedere.")
                             
             with sub_registro:
                 st.markdown("### Registro Contratti Attivi")
@@ -380,12 +381,11 @@ else:
                 if attivi.empty: st.info("Nessun comodato attivo.")
                 else:
                     for id_x, riga in attivi.iterrows():
-                        # Sostituito st.card() rimosso con st.container(border=True) nativo di Streamlit
                         with st.container(border=True):
                             c1, c2 = st.columns([3, 1])
                             with c1:
                                 st.markdown(f"📦 Oggetto: **{riga['id_bene']}** affidato a **{riga['nominativo']}** ({riga['tipo_soggetto']})")
-                                st.caption(f"Assegnato il: {riga['data_consegna']} | ID Contratto: {riga['id_comodato']}")
+                                st.caption(f"Assegnatario il: {riga['data_consegna']} | ID Contratto: {riga['id_comodato']}")
                             with c2:
                                 if st.button("Riconsegna ↩", key=f"ric_{riga['id_comodato']}", type="primary", use_container_width=True):
                                     data_rientro = datetime.now().strftime("%d/%m/%Y %H:%M")
