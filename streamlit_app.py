@@ -13,7 +13,7 @@ try:
 except ImportError:
     GSPREAD_AVAILABLE = False
 
-# Importiamo pyzbar per i codici a barre dalle foto scattate
+# Importiamo pyzbar per i codici a barre dalle foto
 try:
     from pyzbar.pyzbar import decode
     PYZBAR_AVAILABLE = True
@@ -74,7 +74,6 @@ def scarica_da_sheet(nome_scheda):
             records = worksheet.get_all_records()
             return pd.DataFrame(records)
         except gspread.exceptions.WorksheetNotFound:
-            # Crea la scheda se manca sul file online
             if nome_scheda == "Inventario":
                 df_base = pd.DataFrame(columns=["magazzino", "id_articolo", "nome_articolo", "giacenza_totale"])
             elif nome_scheda == "Richieste":
@@ -99,7 +98,6 @@ def carica_su_sheet(df, nome_scheda):
             
             worksheet.clear()
             df_pulito = df.fillna("")
-            # Converte tutte le colonne in stringhe o numeri nativi per evitare bug JSON serialization
             for col in df_pulito.columns:
                 df_pulito[col] = df_pulito[col].astype(str)
             
@@ -116,7 +114,6 @@ if "db_richieste" not in st.session_state:
 if "db_approvvigionamenti" not in st.session_state:
     st.session_state.db_approvvigionamenti = scarica_da_sheet("Ordini")
 
-# Bottone manuale di emergenza per forzare l'aggiornamento dal foglio
 if st.sidebar.button("🔄 Sincronizza ora con Google Fogli"):
     st.session_state.db_inventario = scarica_da_sheet("Inventario")
     st.session_state.db_richieste = scarica_da_sheet("Richieste")
@@ -170,7 +167,7 @@ st.markdown("""
 
 # --- INTERFACCIA LOGIN ---
 if st.session_state.ruolo_utente is None:
-    st.image(URL_LOGO, use_container_width=True)
+    st.image(URL_LOGO, width="stretch")
     st.markdown("<h1>Gestione Magazzini Centralizzata</h1>", unsafe_allow_html=True)
     col_l, col_c, col_r = st.columns([1, 2, 1])
     with col_c:
@@ -195,7 +192,7 @@ if st.session_state.ruolo_utente is None:
                         st.rerun()
                     else: st.error("❌ Password errata.")
 else:
-    st.image(URL_LOGO, use_container_width=True)
+    st.image(URL_LOGO, width="stretch")
     df_inventario = st.session_state.db_inventario
     df_richieste = st.session_state.db_richieste
     df_approv = st.session_state.db_approvvigionamenti
@@ -264,7 +261,6 @@ else:
                 filtro_art = (df_inventario["id_articolo"].astype(str) == codice_pulito) & (df_inventario["magazzino"] == mag_corrente) if not df_inventario.empty else pd.Series([False])
                 
                 if filtro_art.any():
-                    # Converte la giacenza in numero prima di sommare
                     st.session_state.db_inventario.loc[filtro_art, "giacenza_totale"] = st.session_state.db_inventario.loc[filtro_art, "giacenza_totale"].astype(int) + moltiplicatore_qta
                     carica_su_sheet(st.session_state.db_inventario, "Inventario")
                     st.success("✔️ Stock incrementato con successo su Google Sheets!")
@@ -314,7 +310,7 @@ else:
             qta_urgente = st.number_input("Q.tà da richiedere:", min_value=1, step=1)
             if st.button("Invia Richiesta d'Acquisto ad Admin"):
                 nuovo_id_a = int(df_approv["id_acquisto"].astype(float).max()) + 1 if not df_approv.empty else 1
-                nuovo_o = pd.DataFrame([{"id_acquisto": nuovo_id_a, "magazzino": mag_corrente, "articolo": mat_urgente, "quantita_richiesta": int(qta_urgente), "stato": "In attesa", "data_richiesta": datetime.now().strftime("%d/%m/%Y %H:%M")}])
+                nuovo_o = pd.DataFrame([{"id_acquisto": नया_id_a, "magazzino": mag_corrente, "articolo": mat_urgente, "quantita_richiesta": int(qta_urgente), "stato": "In attesa", "data_richiesta": datetime.now().strftime("%d/%m/%Y %H:%M")}])
                 st.session_state.db_approvvigionamenti = pd.concat([df_approv, nuovo_o], ignore_index=True)
                 carica_su_sheet(st.session_state.db_approvvigionamenti, "Ordini")
                 st.success("✔️ Inviata all'approvazione dell'amministratore!")
@@ -337,7 +333,6 @@ else:
         with tab_st:
             if not df_inventario.empty:
                 df_mostrato = df_inventario if mag_filtro_admin == "Mostra Tutti" else df_inventario[df_inventario["magazzino"] == mag_filtro_admin]
-                # Ordinamento alfabetico per magazzino e per nome prodotto richiesto
                 df_mostrato = df_mostrato.sort_values(by=["magazzino", "nome_articolo"])
                 st.dataframe(df_mostrato, use_container_width=True, hide_index=True)
             else:
