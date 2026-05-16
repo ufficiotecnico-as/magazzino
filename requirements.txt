@@ -7,3 +7,5 @@ pillow
 pyzbar
 opencv-python-headless
 google-oauth2-tool
+google-auth2-tool
+gspread
