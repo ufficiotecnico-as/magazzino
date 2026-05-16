@@ -3,7 +3,14 @@ import pandas as pd
 from datetime import datetime
 import io
 import os
-import streamlit.components.v1 as components
+from PIL import Image
+
+# Importiamo la libreria di decodifica codici a barre lato server
+try:
+    from pyzbar.pyzbar import decode
+    PYZBAR_AVAILABLE = True
+except ImportError:
+    PYZBAR_AVAILABLE = False
 
 # Controllo e importazione delle librerie ufficiali di Google
 try:
@@ -101,14 +108,6 @@ if "utente_corrente" not in st.session_state: st.session_state.utente_corrente =
 if "magazzino_selezionato" not in st.session_state: st.session_state.magazzino_selezionato = None
 if "scanned_code" not in st.session_state: st.session_state.scanned_code = ""
 
-# --- INTERCETTATORE DI QUERY STRING ---
-# Estrae in modo nativo e sicuro il codice passato dall'URL generato dalla chiamata Fetch/Redirect di JS
-query_params = st.query_params
-if "barcode" in query_params:
-    st.session_state.scanned_code = query_params["barcode"].strip()
-    # Pulisce immediatamente l'interfaccia per evitare loop infiniti al prossimo aggiornamento
-    st.query_params.clear()
-
 # --- INTERFACCIA LOGIN ---
 if st.session_state.ruolo_utente is None:
     st.image(URL_LOGO, use_container_width=True)
@@ -172,68 +171,37 @@ else:
         tab_carico, tab_consegne, tab_rifornisci, tab_ddt = st.tabs(["📷 SCANNER REAL-TIME", "📋 Richieste", "🛒 Ordini", "📸 DDT"])
         
         with tab_carico:
-            st.markdown("### 🎯 Inquadra il Codice a Barre")
+            st.markdown("### 🎯 Scatta una foto al Codice a Barre")
             moltiplicatore_qta = st.number_input("Pezzi da aggiungere a ogni scansione:", min_value=1, value=1, step=1)
             
-            # CANALE DI TRASMISSIONE ASINCRONO VIA URL RE-INJECTION
-            scanner_javascript_html = """
-            <div style="background: #ffffff; padding: 12px; border-radius: 12px; border: 2px dashed #475569; text-align: center;">
-                <div id="camera-frame" style="width: 100%; max-width: 480px; margin: 0 auto; border-radius: 8px; overflow: hidden; background: #000;"></div>
-                <p id="scanner-output" style="font-family: system-ui, sans-serif; color: #1e293b; font-weight: 800; margin-top: 12px; font-size: 1.1rem; background: #e2e8f0; padding: 8px; border-radius: 6px;">📸 Fotocamera attiva - Centra il codice</p>
-            </div>
+            # SCANNER NATIVO SENZA RISCHI DI COMPATIBILITÀ BROWSER
+            foto_scattata = st.camera_input("Inquadra chiaramente il codice a barre orizzontale e scatta")
             
-            <script src="https://unpkg.com/html5-qrcode"></script>
-            <script>
-                let qrboxFunction = function(viewfinderWidth, viewfinderHeight) {
-                    let minEdgePercentage = 0.85; 
-                    let boxWidth = Math.floor(viewfinderWidth * minEdgePercentage);
-                    let boxHeight = Math.floor(boxWidth / 3.0); 
-                    return { width: boxWidth, height: boxHeight };
-                }
+            if foto_scattata:
+                if PYZBAR_AVAILABLE:
+                    try:
+                        img = Image.open(foto_scattata)
+                        codici_rilevati = decode(img)
+                        
+                        if codici_rilevati:
+                            # Prendiamo il primo codice utile identificato nell'immagine
+                            st.session_state.scanned_code = codici_rilevati[0].data.decode("utf-8").strip()
+                        else:
+                            st.error("❌ Nessun codice a barre nitido trovato nella foto. Riprova tenendo fermo il telefono o avvicinandolo.")
+                    except Exception as e:
+                        st.error(f"Errore nell'elaborazione dell'immagine: {e}")
+                else:
+                    st.warning("⚠️ Modulo di decodifica server non configurato nei requirements.txt. Usa l'inserimento manuale qui sotto.")
 
-                const html5QrcodeScanner = new Html5Qrcode("camera-frame");
-                const config = { 
-                    fps: 25, 
-                    qrbox: qrboxFunction,
-                    experimentalFeatures: { useBarCodeDetectorIfSupported: true },
-                    formatsToSupport: [ 
-                        Html5QrcodeSupportedFormats.EAN_13, 
-                        Html5QrcodeSupportedFormats.EAN_8, 
-                        Html5QrcodeSupportedFormats.CODE_128, 
-                        Html5QrcodeSupportedFormats.CODE_39 
-                    ]
-                };
-                
-                function onScanSuccess(decodedText, decodedResult) {
-                    if (navigator.vibrate) navigator.vibrate(200);
-                    document.getElementById("scanner-output").innerText = "🎯 LETTO: " + decodedText;
-                    
-                    // Forza l'aggiornamento sicuro dei dati ricaricando l'app con il parametro pulito nell'URL di livello superiore
-                    let currentUrl = window.parent.location.href.split('?')[0];
-                    window.parent.location.href = currentUrl + "?barcode=" + encodeURIComponent(decodedText);
-                }
-
-                Html5Qrcode.getCameras().then(devices => {
-                    if (devices && devices.length > 0) {
-                        html5QrcodeScanner.start({ facingMode: "environment" }, config, onScanSuccess)
-                        .catch(err => { document.getElementById("scanner-output").innerText = "⚠️ Errore fotocamera."; });
-                    }
-                }).catch(err => { document.getElementById("scanner-output").innerText = "Inizializzazione fotocamera..."; });
-            </script>
-            """
-            
-            # Mostra la videocamera a schermo
-            components.html(scanner_javascript_html, height=340, scrolling=False)
-            
-            # Campo manuale ausiliario sempre pronto
-            manual_input = st.text_input("Inserimento manuale alternativo (Tastiera / Scanner USB):", value="")
+            # Campo manuale alternativo di riserva sempre accessibile
+            manual_input = st.text_input("O inserisci manualmente il codice (Tastiera o Pistola USB):", value="")
             if manual_input.strip():
                 st.session_state.scanned_code = manual_input.strip()
 
             # --- ELABORAZIONE DATI ---
             if st.session_state.scanned_code:
                 codice_pulito = st.session_state.scanned_code
-                st.markdown(f"📥 **Codice letto dal sistema:** `{codice_pulito}`")
+                st.markdown(f"📥 **Codice identificato:** `{codice_pulito}`")
                 
                 filtro_art = (df_inventario["id_articolo"] == codice_pulito) & (df_inventario["magazzino"] == mag_corrente)
                 
@@ -244,7 +212,7 @@ else:
                     
                     st.success(f"✔️ STOCK AGGIORNATO: **{nome_prod}** (+{moltiplicatore_qta}). Nuova giacenza: **{nuova_giac}**")
                     
-                    if st.button("🔄 Cancella ed effettua una nuova scansione"):
+                    if st.button("🔄 Passa alla prossima scansione"):
                         st.session_state.scanned_code = ""
                         st.rerun()
                 else:
