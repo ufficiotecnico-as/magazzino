@@ -13,7 +13,7 @@ try:
 except ImportError:
     GSPREAD_AVAILABLE = False
 
-# Importiamo pyzbar per i codici a barre dalle foto
+# Importiamo pyzbar per i codici a barre
 try:
     from pyzbar.pyzbar import decode
     PYZBAR_AVAILABLE = True
@@ -310,7 +310,7 @@ else:
             qta_urgente = st.number_input("Q.tà da richiedere:", min_value=1, step=1)
             if st.button("Invia Richiesta d'Acquisto ad Admin"):
                 nuovo_id_a = int(df_approv["id_acquisto"].astype(float).max()) + 1 if not df_approv.empty else 1
-                nuovo_o = pd.DataFrame([{"id_acquisto": नया_id_a, "magazzino": mag_corrente, "articolo": mat_urgente, "quantita_richiesta": int(qta_urgente), "stato": "In attesa", "data_richiesta": datetime.now().strftime("%d/%m/%Y %H:%M")}])
+                nuovo_o = pd.DataFrame([{"id_acquisto": nuovo_id_a, "magazzino": mag_corrente, "articolo": mat_urgente, "quantita_richiesta": int(qta_urgente), "stato": "In attesa", "data_richiesta": datetime.now().strftime("%d/%m/%Y %H:%M")}])
                 st.session_state.db_approvvigionamenti = pd.concat([df_approv, nuovo_o], ignore_index=True)
                 carica_su_sheet(st.session_state.db_approvvigionamenti, "Ordini")
                 st.success("✔️ Inviata all'approvazione dell'amministratore!")
