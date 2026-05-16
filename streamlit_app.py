@@ -14,9 +14,6 @@ try:
 except ImportError:
     GOOGLE_LIBS_AVAILABLE = False
 
-# ==========================================
-# DIZIONARIO DELLE PASSWORD DI SICUREZZA
-# ==========================================
 PASSWORD_MAP = {
     "ata2026": "Personale ATA",
     "officina2026": "Officina",
@@ -30,64 +27,7 @@ LISTA_MAGAZZINI = ["Personale ATA", "Officina", "Tecnici Informatici"]
 
 st.set_page_config(page_title="Gestione Magazzini Scarpa", page_icon="🧺", layout="wide")
 
-# ==========================================
-# FUNZIONE DI CARICAMENTO SU GOOGLE DRIVE
-# ==========================================
-def carica_su_drive(file_bytes, nome_file, mime_type, nome_magazzino):
-    if not GOOGLE_LIBS_AVAILABLE:
-        st.error("⚠️ Errore: Le librerie Google non sono installate.")
-        return None
-    try:
-        if "google_creds" in st.secrets:
-            creds_dict = dict(st.secrets["google_creds"])
-            if "\\n" in creds_dict["private_key"]:
-                creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
-            creds = service_account.Credentials.from_service_account_info(
-                creds_dict, scopes=['https://www.googleapis.com/auth/drive']
-            )
-        elif os.path.exists('google_credentials.json'):
-            creds = service_account.Credentials.from_service_account_file(
-                'google_credentials.json', scopes=['https://www.googleapis.com/auth/drive']
-            )
-        else:
-            st.error("❌ Credenziali di Google non trovate.")
-            return None
-
-        service = build('drive', 'v3', credentials=creds)
-        
-        nome_sottocartella = f"DDT_{nome_magazzino.replace(' ', '_')}"
-        query = f"name='{nome_sottocartella}' and '{ID_CARTELLA_DRIVE_PRINCIPALE}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false"
-        risultato = service.files().list(q=query, spaces='drive', supportsAllDrives=True, includeItemsFromTrashed=False).execute()
-        files = risultato.get('files', [])
-        
-        if files:
-            id_cartella_destinazione = files[0]['id']
-        else:
-            meta_cartella = {
-                'name': nome_sottocartella,
-                'mimeType': 'application/vnd.google-apps.folder',
-                'parents': [ID_CARTELLA_DRIVE_PRINCIPALE]
-            }
-            cartella_creata = service.files().create(body=meta_cartella, fields='id', supportsAllDrives=True).execute()
-            id_cartella_destinazione = cartella_creata.get('id')
-
-        file_metadata = {
-            'name': nome_file, 
-            'parents': [id_cartella_destinazione]
-        }
-        media = MediaIoBaseUpload(io.BytesIO(file_bytes), mimetype=mime_type, resumable=True)
-        file_caricato = service.files().create(
-            body=file_metadata, media_body=media, fields='id', supportsAllDrives=True
-        ).execute()
-        
-        return file_caricato.get('id')
-    except Exception as e:
-        st.error(f"❌ Errore Google Drive: {e}")
-        return None
-
-# ==========================================
-# STILE UX/UI
-# ==========================================
+# --- STILE UX/UI ---
 st.markdown("""
     <style>
         .stApp { background-color: #f1f5f9 !important; color: #0f172a !important; font-family: 'Inter', sans-serif; }
@@ -96,62 +36,67 @@ st.markdown("""
         h2, h3, h4, label, [data-testid="stWidgetLabel"] p { color: #1e293b !important; font-weight: 700 !important; }
         [data-testid="stContainer"] { background-color: #ffffff !important; border: 1px solid #e2e8f0 !important; border-radius: 16px !important; padding: 28px !important; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05) !important; margin-bottom: 20px; }
         div.stButton > button:first-child { background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%) !important; color: #ffffff !important; border-radius: 10px !important; border: none !important; padding: 12px 24px !important; font-weight: 600 !important; width: 100%; }
-        div.stButton > button:first-child:hover { background: #0f172a !important; transform: translateY(-1px); }
         [data-testid="stSidebar"] { background-color: #ffffff !important; border-right: 1px solid #e2e8f0; }
         footer {visibility: hidden;}
-        [data-testid="stHeader"] {background: transparent;}
     </style>
 """, unsafe_allow_html=True)
 
-# ==========================================
-# INIZIALIZZAZIONE DATABASE
-# ==========================================
+# --- FUNZIONE GOOGLE DRIVE ---
+def carica_su_drive(file_bytes, nome_file, mime_type, nome_magazzino):
+    if not GOOGLE_LIBS_AVAILABLE: return None
+    try:
+        if "google_creds" in st.secrets:
+            creds_dict = dict(st.secrets["google_creds"])
+            if "\\n" in creds_dict["private_key"]:
+                creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
+            creds = service_account.Credentials.from_service_account_info(creds_dict, scopes=['https://www.googleapis.com/auth/drive'])
+        else: return None
+        service = build('drive', 'v3', credentials=creds)
+        nome_sottocartella = f"DDT_{nome_magazzino.replace(' ', '_')}"
+        query = f"name='{nome_sottocartella}' and '{ID_CARTELLA_DRIVE_PRINCIPALE}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false"
+        risultato = service.files().list(q=query, spaces='drive', supportsAllDrives=True).execute()
+        files = risultato.get('files', [])
+        id_cartella = files[0]['id'] if files else service.files().create(body={'name': nome_sottocartella, 'mimeType': 'application/vnd.google-apps.folder', 'parents': [ID_CARTELLA_DRIVE_PRINCIPALE]}, fields='id', supportsAllDrives=True).execute().get('id')
+        
+        meta = {'name': nome_file, 'parents': [id_cartella]}
+        media = MediaIoBaseUpload(io.BytesIO(file_bytes), mimetype=mime_type, resumable=True)
+        return service.files().create(body=meta, media_body=media, fields='id', supportsAllDrives=True).execute().get('id')
+    except Exception as e:
+        st.error(f"Errore Drive: {e}")
+        return None
+
+# --- DATABASE INIZIALIZZAZIONE ---
 if "db_inventario" not in st.session_state:
     st.session_state.db_inventario = pd.DataFrame([
         {"magazzino": "Personale ATA", "id_articolo": "8001234567890", "nome_articolo": "Camice lavoro", "giacenza_totale": 20},
         {"magazzino": "Officina", "id_articolo": "8009876543210", "nome_articolo": "Chiave inglese 13mm", "giacenza_totale": 15},
         {"magazzino": "Tecnici Informatici", "id_articolo": "8005555555555", "nome_articolo": "Cavo Ethernet 5m", "giacenza_totale": 40}
     ])
-
 if "db_richieste" not in st.session_state:
     st.session_state.db_richieste = pd.DataFrame(columns=["id_richiesta", "magazzino", "collaboratore", "articolo", "quantita", "stato", "data_richiesta", "data_consegna"])
-
 if "db_approvvigionamenti" not in st.session_state:
     st.session_state.db_approvvigionamenti = pd.DataFrame(columns=["id_acquisto", "magazzino", "articolo", "quantita_richiesta", "stato", "data_richiesta"])
+if "ruolo_utente" not in st.session_state: st.session_state.ruolo_utente = None
+if "utente_corrente" not in st.session_state: st.session_state.utente_corrente = ""
+if "magazzino_selezionato" not in st.session_state: st.session_state.magazzino_selezionato = None
 
-if "ruolo_utente" not in st.session_state:
-    st.session_state.ruolo_utente = None
-if "utente_corrente" not in st.session_state:
-    st.session_state.utente_corrente = ""
-if "magazzino_selezionato" not in st.session_state:
-    st.session_state.magazzino_selezionato = None
-if "scanned_barcode" not in st.session_state:
-    st.session_state.scanned_barcode = ""
-
-# --- SCHERMATA LOGIN ---
+# --- INTERFACCIA LOGIN ---
 if st.session_state.ruolo_utente is None:
     st.image(URL_LOGO, use_container_width=True)
     st.markdown("<h1>Gestione Magazzini Centralizzata</h1>", unsafe_allow_html=True)
-    
     col_l, col_c, col_r = st.columns([1, 2, 1])
     with col_c:
         with st.container():
-            st.markdown("<h3 style='text-align: center; margin-top:0;'>🔑 Seleziona Profilo</h3>", unsafe_allow_html=True)
             scelta_accesso = st.radio("", ["Sono un Collaboratore (Fai una Richiesta)", "Sono un Magazziniere / Admin"], label_visibility="collapsed")
-            st.markdown("<br>", unsafe_allow_html=True)
-            
             if scelta_accesso == "Sono un Collaboratore (Fai una Richiesta)":
                 nome_input = st.text_input("Inserisci il tuo Nome e Cognome:")
                 if st.button("Accedi all'area Richieste"):
-                    if not nome_input.strip():
-                        st.error("⚠️ Inserisci il tuo nome per continuare.")
-                    else:
+                    if nome_input.strip():
                         st.session_state.ruolo_utente = "collaboratore"
                         st.session_state.utente_corrente = nome_input.strip()
                         st.rerun()
-                        
-            elif scelta_accesso == "Sono un Magazziniere / Admin":
-                password_input = st.text_input("Inserisci la tua password personale di sblocco:", type="password")
+            else:
+                password_input = st.text_input("Password di sblocco:", type="password")
                 if st.button("Verifica Credenziali"):
                     if password_input in PASSWORD_MAP:
                         st.session_state.ruolo_utente = "magazziniere"
@@ -160,283 +105,185 @@ if st.session_state.ruolo_utente is None:
                     elif password_input == PASSWORD_ADMIN:
                         st.session_state.ruolo_utente = "admin"
                         st.rerun()
-                    else:
-                        st.error("❌ Password errata o non associata ad alcun magazzino. Riprova.")
-
-# --- INTERFACCE ABILITATE ---
+                    else: st.error("❌ Password errata.")
 else:
     st.image(URL_LOGO, use_container_width=True)
-    
     df_inventario = st.session_state.db_inventario
     df_richieste = st.session_state.db_richieste
     df_approv = st.session_state.db_approvvigionamenti
 
     with st.sidebar:
         st.markdown(f"<h3>🧺 Area {st.session_state.ruolo_utente.upper()}</h3>", unsafe_allow_html=True)
-        if st.session_state.ruolo_utente == "magazziniere":
-            st.info(f"📍 Magazzino: **{st.session_state.magazzino_selezionato}**")
-        elif st.session_state.ruolo_utente == "admin":
-            st.success("👑 Accesso Totale Admin")
-        elif st.session_state.utente_corrente:
-            st.write(f"👤 Utente: {st.session_state.utente_corrente}")
-            
-        st.write("---")
+        if st.session_state.ruolo_utente == "magazziniere": st.info(f"📍 Magazzino: **{st.session_state.magazzino_selezionato}**")
         if st.button("🔒 Esci / Cambia Utente"):
             st.session_state.ruolo_utente = None
-            st.session_state.utente_corrente = ""
-            st.session_state.magazzino_selezionato = None
-            st.session_state.scanned_barcode = ""
             st.rerun()
 
-    # --- 1. SCHERMATA COLLABORATORE ---
+    # --- AREA COLLABORATORE ---
     if st.session_state.ruolo_utente == "collaboratore":
         st.markdown(f"<h1>👋 Benvenuto, {st.session_state.utente_corrente}</h1>", unsafe_allow_html=True)
-        
         with st.container():
-            st.markdown("<h3>📋 Nuova Richiesta Materiale</h3>", unsafe_allow_html=True)
             target_magazzino = st.selectbox("A quale magazzino vuoi inviare la richiesta?", LISTA_MAGAZZINI)
-            
-            articoli_filtrati = df_inventario[df_inventario["magazzino"] == target_magazzino]["nome_articolo"].tolist()
-            articoli_filtrati.append("Altro...")
-            
+            articoli_filtrati = df_inventario[df_inventario["magazzino"] == target_magazzino]["nome_articolo"].tolist() + ["Altro..."]
             articolo_selezionato = st.selectbox("Seleziona cosa ti serve:", articoli_filtrati)
             articolo_finale = st.text_input("Specifica il materiale a mano:") if articolo_selezionato == "Altro..." else articolo_selezionato
             qta = st.number_input("Quantità necessaria:", min_value=1, step=1)
-            
-            st.markdown("<br>", unsafe_allow_html=True)
             if st.button("Invia Ordine in Magazzino"):
-                if articolo_selezionato == "Altro..." and not articolo_finale.strip():
-                    st.error("⚠️ Specifica il nome del materiale.")
-                else:
-                    nuovo_id = int(df_richieste["id_richiesta"].max()) + 1 if not df_richieste.empty else 1
-                    nuova_r = pd.DataFrame([{
-                        "id_richiesta": nuovo_id, "magazzino": target_magazzino, "collaboratore": st.session_state.utente_corrente, 
-                        "articolo": articolo_finale, "quantita": int(qta), "stato": "In attesa", 
-                        "data_richiesta": datetime.now().strftime("%d/%m/%Y %H:%M"), "data_consegna": ""
-                    }])
-                    st.session_state.db_richieste = pd.concat([df_richieste, nuova_r], ignore_index=True)
-                    st.success(f"✔️ Richiesta inoltrata al magazzino ({target_magazzino}) con successo!")
+                nuovo_id = int(df_richieste["id_richiesta"].max()) + 1 if not df_richieste.empty else 1
+                nuova_r = pd.DataFrame([{"id_richiesta": nuovo_id, "magazzino": target_magazzino, "collaboratore": st.session_state.utente_corrente, "articolo": articolo_finale, "quantita": int(qta), "stato": "In attesa", "data_richiesta": datetime.now().strftime("%d/%m/%Y %H:%M"), "data_consegna": ""}])
+                st.session_state.db_richieste = pd.concat([df_richieste, nuova_r], ignore_index=True)
+                st.success("✔️ Richiesta inoltrata!")
 
-    # --- 2. SCHERMATA MAGAZZINIERE ---
+    # --- AREA MAGAZZINIERE ---
     elif st.session_state.ruolo_utente == "magazziniere":
         mag_corrente = st.session_state.magazzino_selezionato
         st.markdown(f"<h1>🚚 Pannello Operativo: {mag_corrente}</h1>", unsafe_allow_html=True)
         
-        tab_carico, tab_consegne, tab_rifornisci, tab_ddt = st.tabs([
-            "📷 SCANNER SMARTPHONE", "📋 Richieste in Arrivo", "🛒 Richiedi Rifornimenti a Admin", "📸 Archivia Foto DDT"
-        ])
+        tab_carico, tab_consegne, tab_rifornisci, tab_ddt = st.tabs(["📷 SCANNER REAL-TIME", "📋 Richieste", "🛒 Ordini", "📸 DDT"])
         
-        # TAB 1: LETTORE FOTOCAMERA DIRETTO PER SMARTPHONE
         with tab_carico:
-            st.markdown("### 📷 Scanner Barcode Integrato")
-            st.caption("Consenti l'accesso alla fotocamera nel riquadro sotto. Inquadra il codice a barre per caricarlo istantaneamente.")
+            st.markdown("### 🎯 Inquadra il Codice a Barre")
+            moltiplicatore_qta = st.number_input("Pezzi da aggiungere a ogni scansione:", min_value=1, value=1, step=1)
             
-            moltiplicatore_qta = st.number_input("Quantità da aggiungere ad ogni rilevamento:", min_value=1, value=1, step=1)
-            
-            # Componente JavaScript per catturare il codice via WebRTC (scavalca i blocchi di Streamlit)
-            barcode_html = """
-            <div style="background: #ffffff; padding: 10px; border-radius: 12px; border: 1px solid #e2e8f0; text-align: center;">
-                <div id="reader" style="width: 100%; max-width: 450px; margin: 0 auto; border-radius: 8px; overflow: hidden;"></div>
-                <p id="status" style="font-family: sans-serif; color: #475569; font-weight: bold; margin-top: 10px;">🎥 Fotocamera Pronta...</p>
+            # Sistema JavaScript Avanzato: Forza i formati EAN/CODE e comunica tramite i parametri dell'URL per aggirare i blocchi mobile
+            scanner_prof_html = """
+            <div style="background: #fafafa; padding: 15px; border-radius: 16px; border: 2px dashed #cbd5e1; text-align: center;">
+                <div id="interactive-reader" style="width: 100%; max-width: 480px; margin: 0 auto; border-radius: 12px; overflow: hidden; background: #000;"></div>
+                <h2 id="scanned-result" style="font-family: sans-serif; color: #1e293b; margin-top: 15px; font-size: 1.2rem;">In attesa di scansione...</h2>
             </div>
             
             <script src="https://unpkg.com/html5-qrcode"></script>
             <script>
-                const html5QrCode = new Html5Qrcode("reader");
-                const config = { fps: 15, qrbox: { width: 300, height: 150 } };
-                
                 function onScanSuccess(decodedText, decodedResult) {
-                    document.getElementById("status").innerText = "🎯 Rilevato: " + decodedText;
-                    document.getElementById("status").style.color = "#16a34a";
+                    document.getElementById("scanned-result").innerText = "🎯 RILEVATO: " + decodedText;
+                    document.getElementById("scanned-result").style.color = "#15803d";
                     
-                    // Invia il codice a Streamlit simulando un cambio di hash URL
-                    window.parent.postMessage({
-                        type: 'streamlit:setComponentValue',
-                        value: decodedText
-                    }, '*');
+                    // Vibrazione del telefono per dare feedback al magazziniere
+                    if (navigator.vibrate) navigator.vibrate(200);
                     
-                    // Pausa per evitare letture doppie immediate dello stesso codice
-                    html5QrCode.pause();
-                    setTimeout(() => { html5QrCode.resume(); }, 2500);
+                    // Invio immediato e pulito del codice a Streamlit modificando l'URL del Frame padre
+                    const url = new URL(window.parent.location.href);
+                    url.searchParams.set("barcode", decodedText);
+                    window.parent.location.href = url.toString();
                 }
 
-                // Avvia automaticamente usando la fotocamera posteriore (environment)
+                const html5QrcodeScanner = new Html5Qrcode("interactive-reader");
+                
+                // Configurazione per massimizzare la precisione sui codici a barre lineari commerciali (EAN, Code128, Code39)
+                const config = { 
+                    fps: 20, 
+                    qrbox: { width: 320, height: 160 },
+                    formatsToSupport: [ 
+                        Html5QrcodeSupportedFormats.EAN_13, 
+                        Html5QrcodeSupportedFormats.EAN_8, 
+                        Html5QrcodeSupportedFormats.CODE_128, 
+                        Html5QrcodeSupportedFormats.CODE_39,
+                        Html5QrcodeSupportedFormats.QR_CODE 
+                    ]
+                };
+
                 Html5Qrcode.getCameras().then(devices => {
                     if (devices && devices.length > 0) {
-                        html5QrCode.start({ facingMode: "environment" }, config, onScanSuccess)
+                        html5QrcodeScanner.start({ facingMode: "environment" }, config, onScanSuccess)
                         .catch(err => {
-                            document.getElementById("status").innerText = "⚠️ Errore fotocamera: Richiedi autorizzazione sul browser.";
-                            document.getElementById("status").style.color = "#dc2626";
+                            document.getElementById("scanned-result").innerText = "❌ Errore fotocamera. Attiva i permessi nel browser.";
+                            document.getElementById("scanned-result").style.color = "#b91c1c";
                         });
                     }
                 }).catch(err => {
-                    document.getElementById("status").innerText = "Impossibile accedere alle telecamere.";
+                    document.getElementById("scanned-result").innerText = "Nessuna fotocamera trovata.";
                 });
             </script>
             """
             
-            # Incorpora il lettore video reale nell'app
-            scanned_value = components.html(barcode_html, height=380, scrolling=False)
+            components.html(scanner_prof_html, height=420, scrolling=False)
             
-            # Gestione del codice intercettato dallo smartphone
-            codice_rilevato_manuale = st.text_input("Se lo scanner non si avvia, scrivi il codice a mano e premi Invio:", value="")
+            # Intercettazione del codice dall'URL generato da JavaScript
+            query_params = st.query_params
+            codice_rilevato = query_params.get("barcode", "")
             
-            codice_finale_scansione = codice_rilevato_manuale.strip()
+            # Campo alternativo manuale di emergenza
+            manual_input = st.text_input("Inserimento manuale alternativo (scrivi e premi invio):", value="")
+            codice_da_elaborare = manual_input.strip() if manual_input.strip() else codice_rilevato
             
-            # Campo nascosto di controllo per l'input automatico via JS
-            if codice_finale_scansione:
-                barcode_pulito = codice_finale_scansione
-                filtro_codice = (df_inventario["id_articolo"] == barcode_pulito) & (df_inventario["magazzino"] == mag_corrente)
+            if codice_da_elaborare:
+                st.markdown(f"📦 **Elaborazione codice: `{codice_da_elaborare}`**")
+                filtro_art = (df_inventario["id_articolo"] == codice_da_elaborare) & (df_inventario["magazzino"] == mag_corrente)
                 
-                if filtro_codice.any():
-                    st.session_state.db_inventario.loc[filtro_codice, "giacenza_totale"] += moltiplicatore_qta
-                    nome_art = df_inventario.loc[filtro_codice, "nome_articolo"].values[0]
-                    nuovo_st = st.session_state.db_inventario.loc[filtro_codice, "giacenza_totale"].values[0]
-                    st.success(f"⚡ AGGIORNATO: **{nome_art}** | +{moltiplicatore_qta} pz registrati! Giacenza attuale: **{nuovo_st}**")
+                if filtro_art.any():
+                    st.session_state.db_inventario.loc[filtro_art, "giacenza_totale"] += moltiplicatore_qta
+                    nome_prod = df_inventario.loc[filtro_art, "nome_articolo"].values[0]
+                    nuova_giac = st.session_state.db_inventario.loc[filtro_art, "giacenza_totale"].values[0]
+                    st.success(f"✔️ Incrementato: **{nome_prod}** (+{moltiplicatore_qta}). Nuova giacenza: **{nuova_giac}**")
+                    
+                    # Reset pulito dei parametri per preparare la prossima scansione
+                    st.query_params.clear()
+                    if st.button("Sblocca per prossimo codice"): st.rerun()
                 else:
-                    st.warning(f"📦 Il codice `{barcode_pulito}` non esiste in questo reparto. Censiscilo ora:")
-                    with st.form("nuovo_art_scanner"):
-                        nome_nuovo = st.text_input("Nome del nuovo articolo:")
-                        if st.form_submit_button("Salva ed Inserisci"):
-                            if nome_nuovo.strip():
-                                nuovo_item = pd.DataFrame([{
-                                    "magazzino": mag_corrente,
-                                    "id_articolo": barcode_pulito,
-                                    "nome_articolo": nome_nuovo.strip(),
-                                    "giacenza_totale": int(moltiplicatore_qta)
-                                }])
-                                st.session_state.db_inventario = pd.concat([df_inventario, nuovo_item], ignore_index=True)
-                                st.success("Articolo inserito correttamente!")
+                    st.warning("🆕 Codice non censito nel tuo magazzino. Registralo ora:")
+                    with st.form("registrazione_rapida"):
+                        nome_nuovo_art = st.text_input("Nome del Prodotto:")
+                        if st.form_submit_button("Mappa Barcode e Salva"):
+                            if nome_nuovo_art.strip():
+                                nuovo_p = pd.DataFrame([{"magazzino": mag_corrente, "id_articolo": codice_da_elaborare, "nome_articolo": nome_nuovo_art.strip(), "giacenza_totale": int(moltiplicatore_qta)}])
+                                st.session_state.db_inventario = pd.concat([df_inventario, nuovo_p], ignore_index=True)
+                                st.success("Registrato!")
+                                st.query_params.clear()
                                 st.rerun()
 
             st.write("---")
-            st.markdown("#### 📦 Stato Giacenze del tuo Reparto")
-            df_mio_mag = st.session_state.db_inventario[st.session_state.db_inventario["magazzino"] == mag_corrente]
-            st.dataframe(df_mio_mag[["id_articolo", "nome_articolo", "giacenza_totale"]], use_container_width=True, hide_index=True)
+            st.markdown("#### 📦 Stato Giacenze Reparto")
+            st.dataframe(df_inventario[df_inventario["magazzino"] == mag_corrente][["id_articolo", "nome_articolo", "giacenza_totale"]], use_container_width=True, hide_index=True)
 
+        # --- ALTRI TAB MAGAZZINIERE ---
         with tab_consegne:
             richieste_mie = df_richieste[(df_richieste["stato"] == "In attesa") & (df_richieste["magazzino"] == mag_corrente)]
-            if richieste_mie.empty:
-                st.info(f"✨ Nessuna richiesta da evadere per il magazzino {mag_corrente}.")
-            else:
-                for idx, row in richieste_mie.iterrows():
-                    with st.container():
-                        c1, c2, c3 = st.columns([1, 4, 2])
-                        with c1: st.write(f"**ID #{row['id_richiesta']}**")
-                        with c2: st.markdown(f"👤 **{row['collaboratore']}**<br>Richiede: <span style='color:#1e3a8a;font-weight:bold;'>{row['quantita']}x {row['articolo']}</span>", unsafe_allow_html=True)
-                        with c3:
-                            if st.button("Consegna ✔", key=f"btn_{row['id_richiesta']}"):
-                                filtro = (df_inventario["nome_articolo"] == row['articolo']) & (df_inventario["magazzino"] == mag_corrente)
-                                if filtro.any():
-                                    giacenza = int(df_inventario.loc[filtro, "giacenza_totale"].values[0])
-                                    if giacenza >= int(row['quantita']):
-                                        st.session_state.db_richieste.loc[st.session_state.db_richieste["id_richiesta"] == row["id_richiesta"], "stato"] = "Consegnato"
-                                        st.session_state.db_richieste.loc[st.session_state.db_richieste["id_richiesta"] == row["id_richiesta"], "data_consegna"] = datetime.now().strftime("%d/%m/%Y %H:%M")
-                                        st.session_state.db_inventario.loc[filtro, "giacenza_totale"] = giacenza - int(row['quantita'])
-                                        st.success("Evaso!")
-                                        st.rerun()
-                                    else: 
-                                        st.error(f"❌ Stock insufficiente! Disponibili solo {giacenza} pezzi.")
-                                else: 
-                                    st.error("⚠️ Articolo personalizzato. Censiscilo prima di consegnarlo.")
+            if richieste_mie.empty: st.info("Nessuna richiesta pendente.")
+            for idx, row in richieste_mie.iterrows():
+                with st.container():
+                    c1, c2 = st.columns([5, 2])
+                    c1.write(f"👤 **{row['collaboratore']}** vuole {row['quantita']}x *{row['articolo']}*")
+                    if c2.button("Consegna ✔", key=f"evadi_{row['id_richiesta']}"):
+                        filtro = (df_inventario["nome_articolo"] == row['articolo']) & (df_inventario["magazzino"] == mag_corrente)
+                        if filtro.any() and df_inventario.loc[filtro, "giacenza_totale"].values[0] >= row['quantita']:
+                            st.session_state.db_inventario.loc[filtro, "giacenza_totale"] -= row['quantita']
+                            st.session_state.db_richieste.loc[st.session_state.db_richieste["id_richiesta"] == row["id_richiesta"], "stato"] = "Consegnato"
+                            st.session_state.db_richieste.loc[st.session_state.db_richieste["id_richiesta"] == row["id_richiesta"], "data_consegna"] = datetime.now().strftime("%d/%m/%Y %H:%M")
+                            st.rerun()
+                        else: st.error("Stock insufficiente o articolo da censire.")
 
         with tab_rifornisci:
-            st.markdown("### 🛒 Invia una richiesta di acquisto o riassortimento all'Admin")
-            with st.container():
-                materiale_urgente = st.text_input("Quale materiale manca o va acquistato?")
-                qta_urgente = st.number_input("Quantità confezioni/pezzi da ordinare:", min_value=1, step=1)
-                
-                if st.button("Invia Richiesta di Approvvigionamento"):
-                    if not materiale_urgente.strip():
-                        st.error("Inserisci il nome del materiale da richiedere.")
-                    else:
-                        nuovo_id_acquisto = int(df_approv["id_acquisto"].max()) + 1 if not df_approv.empty else 1
-                        nuovo_ordine = pd.DataFrame([{
-                            "id_acquisto": nuovo_id_acquisto,
-                            "magazzino": mag_corrente,
-                            "articolo": materiale_urgente.strip(),
-                            "quantita_richiesta": int(qta_urgente),
-                            "stato": "In attesa di approvazione Admin",
-                            "data_richiesta": datetime.now().strftime("%d/%m/%Y %H:%M")
-                        }])
-                        st.session_state.db_approvvigionamenti = pd.concat([df_approv, nuovo_ordine], ignore_index=True)
-                        st.success("🚀 Richiesta inoltrata correttamente al Super Admin!")
-                        st.rerun()
+            mat_urgente = st.text_input("Materiale da ordinare:")
+            qta_urgente = st.number_input("Quantità:", min_value=1, step=1)
+            if st.button("Invia Richiesta ad Admin"):
+                nuovo_id_a = int(df_approv["id_acquisto"].max()) + 1 if not df_approv.empty else 1
+                st.session_state.db_approvvigionamenti = pd.concat([df_approv, pd.DataFrame([{"id_acquisto": nuovo_id_a, "magazzino": mag_corrente, "articolo": mat_urgente, "quantita_richiesta": int(qta_urgente), "stato": "In attesa", "data_richiesta": datetime.now().strftime("%d/%m/%Y %H:%M")}])], ignore_index=True)
+                st.success("Inviata!")
 
         with tab_ddt:
-            st.markdown(f"### 📸 Archiviazione DDT - Sottocartella: DDT_{mag_corrente.replace(' ', '_')}")
-            with st.container():
-                file_ddt = st.file_uploader("Scatta una foto al DDT o seleziona un file", type=["png", "jpg", "jpeg", "pdf"], key="ddt_uploader")
-                
-                if file_ddt is not None:
-                    if not file_ddt.name.endswith(".pdf"):
-                        st.image(file_ddt, caption="Anteprima documento", width=250)
-                    fornitore = st.text_input("Fornitore:")
-                    if st.button("Invia ed Archivia su Google Drive 🚀"):
-                        with st.spinner("Salvataggio in corso..."):
-                            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                            tag_fornitore = f"_{fornitore.strip().replace(' ', '_')}" if fornitore.strip() else ""
-                            ext = ".pdf" if file_ddt.name.endswith(".pdf") else ".jpg"
-                            nome_file = f"DDT_{mag_corrente.replace(' ', '_')}{tag_fornitore}_{timestamp}{ext}"
-                            
-                            id_drive = carica_su_drive(file_ddt.getvalue(), nome_file, file_ddt.type, mag_corrente)
-                            if id_drive: 
-                                st.success(f"✔️ Archiviato sotto la cartella di {mag_corrente}!")
+            file_ddt = st.file_uploader("Carica foto DDT", type=["png", "jpg", "jpeg", "pdf"])
+            fornitore = st.text_input("Fornitore:")
+            if file_ddt and st.button("Archivia su Google Drive"):
+                nome_f = f"DDT_{mag_corrente}_{fornitore}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
+                if carica_su_drive(file_ddt.getvalue(), nome_f, file_ddt.type, mag_corrente):
+                    st.success("Archiviato su Drive!")
 
-    # --- 3. SCHERMATA AMMINISTRATORE ---
+    # --- AREA ADMIN ---
     elif st.session_state.ruolo_utente == "admin":
-        st.markdown("<h1>📊 Pannello Controllo Globale Admin</h1>", unsafe_allow_html=True)
+        st.markdown("<h1>👑 Controllo Globale Admin</h1>", unsafe_allow_html=True)
+        tab_st, tab_ac = st.tabs(["📊 Inventari", "🛒 Approvazioni"])
         
-        tab_admin_storico, tab_admin_acquisti = st.tabs(["📊 Inventari & Storico Consegne", "🛒 Approvazioni Ordini Rifornimento"])
-        
-        with tab_admin_storico:
-            filtro_admin = st.selectbox("🔍 Scegli quale magazzino esaminare (o Mostra Tutto):", ["Mostra Tutto"] + LISTA_MAGAZZINI)
-            df_inv_visualizza = df_inventario if filtro_admin == "Mostra Tutto" else df_inventario[df_inventario["magazzino"] == filtro_admin]
-            df_req_visualizza = df_richieste if filtro_admin == "Mostra Tutto" else df_richieste[df_richieste["magazzino"] == filtro_admin]
-            
-            with st.container():
-                st.markdown(f"<h3>📋 Inventario di Magazzino ({filtro_admin})</h3>", unsafe_allow_html=True)
-                st.dataframe(df_inv_visualizza, use_container_width=True, hide_index=True)
-                
-            with st.container():
-                st.markdown(f"<h3>⏱ Storico Completo Consegne ({filtro_admin})</h3>", unsafe_allow_html=True)
-                consegnati = df_req_visualizza[df_req_visualizza["stato"] == "Consegnato"]
-                if consegnati.empty: 
-                    st.write("Nessuna consegna registrata per questo filtro.")
-                else: 
-                    st.dataframe(consegnati[["data_consegna", "magazzino", "collaboratore", "articolo", "quantita"]], use_container_width=True, hide_index=True)
-                
-            csv = df_req_visualizza.to_csv(index=False).encode('utf-8')
-            st.download_button(label="📥 Esporta Questo Registro in Excel (CSV)", data=csv, file_name="report_globale_magazzini.csv", mime="text/csv")
-
-        with tab_admin_acquisti:
-            st.markdown("### 🛒 Richieste di Approvvigionamento dai Magazzinieri")
-            acquisti_pendenti = df_approv[df_approv["stato"] == "In attesa di approvazione Admin"]
-            
-            if acquisti_pendenti.empty:
-                st.info("✨ Non ci sono richieste di acquisto in sospeso dai magazzini.")
-            else:
-                for idx, row in acquisti_pendenti.iterrows():
-                    with st.container():
-                        c1, c2, c3 = st.columns([2, 3, 2])
-                        with c1:
-                            st.markdown(f"📦 Magazzino: **{row['magazzino']}**<br><small>Data: {row['data_richiesta']}</small>", unsafe_allow_html=True)
-                        with c2:
-                            st.markdown(f"Articolo Richiesto: <span style='color:#b91c1c; font-weight:bold;'>{row['quantita_richiesta']}x {row['articolo']}</span>", unsafe_allow_html=True)
-                        with c3:
-                            if st.button("Approva ed Ordina ed Aggiorna Giacenza ✔", key=f"appr_{row['id_acquisto']}"):
-                                st.session_state.db_approvvigionamenti.loc[st.session_state.db_approvvigionamenti["id_acquisto"] == row["id_acquisto"], "stato"] = "Approvato e Caricato"
-                                
-                                filtro_inventario = (df_inventario["nome_articolo"] == row["articolo"]) & (df_inventario["magazzino"] == row["magazzino"])
-                                if filtro_inventario.any():
-                                    st.session_state.db_inventario.loc[filtro_inventario, "giacenza_totale"] += int(row["quantita_richiesta"])
-                                else:
-                                    nuovo_id_generato = f"NEW_{row['id_acquisto']}"
-                                    nuovo_item = pd.DataFrame([{
-                                        "magazzino": row["magazzino"], "id_articolo": nuovo_id_generato, 
-                                        "nome_articolo": row["articolo"], "giacenza_totale": int(row["quantita_richiesta"])
-                                    }])
-                                    st.session_state.db_inventario = pd.concat([st.session_state.db_inventario, nuovo_item], ignore_index=True)
-                                
-                                st.success("Ordine Approvato! Lo stock è stato caricato nel magazzino.")
-                                st.rerun()
+        with tab_st:
+            st.dataframe(df_inventario, use_container_width=True, hide_index=True)
+        with tab_ac:
+            pendenti = df_approv[df_approv["stato"] == "In attesa"]
+            if pendenti.empty: st.info("Nessun ordine in attesa.")
+            for idx, row in pendenti.iterrows():
+                with st.container():
+                    st.write(f"🏢 {row['magazzino']} chiede {row['quantita_richiesta']}x {row['articolo']}")
+                    if st.button("Approva e Carica", key=f"app_{row['id_acquisto']}"):
+                        st.session_state.db_approvvigionamenti.loc[df_approv["id_acquisto"] == row["id_acquisto"], "stato"] = "Approvato"
+                        filtro = (df_inventario["nome_articolo"] == row["articolo"]) & (df_inventario["magazzino"] == row["magazzino"])
+                        if filtro.any(): st.session_state.db_inventario.loc[filtro, "giacenza_totale"] += row["quantita_richiesta"]
+                        else: st.session_state.db_inventario = pd.concat([df_inventario, pd.DataFrame([{"magazzino": row["magazzino"], "id_articolo": f"NEW_{row['id_acquisto']}", "nome_articolo": row["articolo"], "giacenza_totale": row["quantita_richiesta"]}])], ignore_index=True)
+                        st.rerun()
