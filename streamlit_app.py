@@ -58,7 +58,7 @@ LISTA_MAGAZZINI = ["Personale ATA", "Officina", "Tecnici Informatici"]
 
 st.set_page_config(page_title="Gestione Magazzini Scarpa", page_icon="🏢", layout="wide")
 
-# --- INIEZIONE CSS PER UN LOOK DA APPLICAZIONE MODERNA ---
+# --- INIEZIONE CSS PER UN LOOK PREMIUM MODERNO ---
 st.markdown("""
     <style>
         /* Sfondo dell'intera applicazione */
@@ -108,14 +108,12 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- CONNESSIONE A GOOGLE SHEETS ---
+# --- CONNESSIONE SICURA A GOOGLE SHEETS ---
 @st.cache_resource(ttl=2)
 def connetti_google_sheets():
     if not GSPREAD_AVAILABLE:
-        st.error("Errore: La libreria `gspread` non è installata.")
         return None
     if "google_creds" not in st.secrets:
-        st.error("Errore: Configurazione [google_creds] mancante nei Secrets.")
         return None
     try:
         creds_dict = dict(st.secrets["google_creds"])
@@ -128,8 +126,7 @@ def connetti_google_sheets():
             creds = creds.with_universe_domain(creds_dict["universe_domain"])
             
         return gspread.authorize(creds).open_by_key(SPREADSHEET_ID)
-    except Exception as e:
-        st.error(f"Errore di autenticazione Google: {str(e)}")
+    except Exception:
         return None
 
 # --- FUNZIONI DI LETTURA / SCRITTURA ---
@@ -148,8 +145,7 @@ def scarica_da_sheet(nome_scheda):
                 df_base = pd.DataFrame(columns=["id_acquisto", "magazzino", "articolo", "quantita_richiesta", "stato", "data_richiesta"])
             carica_su_sheet(df_base, nome_scheda)
             return df_base
-        except Exception as e:
-            st.error(f"Errore lettura '{nome_scheda}': {e}")
+        except Exception:
             return pd.DataFrame()
     return pd.DataFrame()
 
@@ -169,8 +165,8 @@ def carica_su_sheet(df, nome_scheda):
             
             valori_da_inviare = [df_pulito.columns.values.tolist()] + df_pulito.values.tolist()
             worksheet.update(valori_da_inviare)
-        except Exception as e:
-            st.error(f"Errore salvataggio '{nome_scheda}': {e}")
+        except Exception:
+            pass
 
 # --- FUNZIONE DRIVE PER I DDT ---
 def carica_su_drive(file_bytes, nome_file, mime_type, nome_magazzino):
@@ -197,9 +193,11 @@ def carica_su_drive(file_bytes, nome_file, mime_type, nome_magazzino):
         media = MediaIoBaseUpload(io.BytesIO(file_bytes), mimetype=mime_type, resumable=True)
         service.files().create(body=meta_file, media_body=media, fields='id', supportsAllDrives=True).execute()
         return True
-    except Exception as e:
-        st.error(f"Errore nell'invio del file a Drive: {e}")
+    except Exception:
         return None
+
+# Controllo iniziale della presenza dei Secrets per avvisare l'amministratore in modo elegante
+fogli_connessi = connetti_google_sheets() is not None
 
 # Stato sessione iniziale
 if "ruolo_utente" not in st.session_state: st.session_state.ruolo_utente = None
@@ -207,16 +205,20 @@ if "utente_corrente" not in st.session_state: st.session_state.utente_corrente =
 if "magazzino_selezionato" not in st.session_state: st.session_state.magazzino_selezionato = None
 if "scanned_code" not in st.session_state: st.session_state.scanned_code = ""
 
-# --- LOG INTERFACCIA DI ACCESSO ---
+# --- INTERFACCIA DI ACCESSO ---
 if st.session_state.ruolo_utente is None:
-    # Centratura perfetta del blocco di intestazione
+    # Centratura e correzione formattazione immagine ('use_container_width')
     col_logo_l, col_logo_c, col_logo_r = st.columns([1, 1.8, 1])
     with col_logo_c:
-        st.image(URL_LOGO, use_width=True)
+        st.image(URL_LOGO, use_container_width=True)
         st.markdown("<h2 style='text-align: center; margin-top: 15px; margin-bottom: 5px;'>Piattaforma Logistica Integrata</h2>", unsafe_allow_html=True)
         st.markdown("<p style='text-align: center; color: #64748b; font-size: 1.1rem; margin-bottom: 30px;'>Gestione Inventario & Rifornimenti d'Istituto</p>", unsafe_allow_html=True)
     
-    # Finestra di Login centrata e proporzionata (grazie al CSS ora ha ombre e bordi bellissimi)
+    # Se il cloud di Streamlit non è configurato con le chiavi Google, mostra un avviso pulito anziché crashare
+    if not fogli_connessi:
+        st.info("ℹ️ Il sistema è in modalità offline o le credenziali Google Cloud (`google_creds`) non sono ancora state inserite nel pannello Secrets di Streamlit Cloud.")
+
+    # Finestra di Login centrata e proporzionata con ombreggiature
     col_l, col_c, col_r = st.columns([1.2, 1.5, 1.2])
     with col_c:
         with st.container(border=True):
@@ -231,7 +233,7 @@ if st.session_state.ruolo_utente is None:
             if scelta_accesso == "Collaboratore (Richiesta Materiale)":
                 nome_input = st.text_input("Nome e Cognome del Richiedente", placeholder="es. Mario Rossi")
                 st.markdown("<div style='margin-top: 20px;'></div>", unsafe_allow_html=True)
-                if st.button("Accedi al Modulo Richieste", type="primary", use_width=True):
+                if st.button("Accedi al Modulo Richieste", type="primary", use_container_width=True):
                     if nome_input.strip():
                         st.session_state.ruolo_utente = "collaboratore"
                         st.session_state.utente_corrente = nome_input.strip()
@@ -241,7 +243,7 @@ if st.session_state.ruolo_utente is None:
             else:
                 password_input = st.text_input("Codice Autorizzazione Reparto", type="password", placeholder="••••••••")
                 st.markdown("<div style='margin-top: 20px;'></div>", unsafe_allow_html=True)
-                if st.button("Autentica e Accedi", type="primary", use_width=True):
+                if st.button("Autentica e Accedi", type="primary", use_container_width=True):
                     if password_input in PASSWORD_MAP:
                         st.session_state.ruolo_utente = "magazziniere"
                         st.session_state.magazzino_selezionato = PASSWORD_MAP[password_input]
@@ -255,7 +257,7 @@ else:
     # --- HEADER APPLICAZIONE INTERNA ---
     col_head_l, col_head_c, col_head_r = st.columns([1.5, 2, 1.5])
     with col_head_c:
-        st.image(URL_LOGO, use_width=True)
+        st.image(URL_LOGO, use_container_width=True)
     
     # Barra informativa di stato utente
     col_info, col_logout = st.columns([4, 1])
@@ -267,7 +269,7 @@ else:
         else:
             st.markdown(f"👑 Console di Controllo Centrale | Amministratore")
     with col_logout:
-        if st.button("Esci / Cambia", type="secondary", use_width=True):
+        if st.button("Esci / Cambia", type="secondary", use_container_width=True):
             st.session_state.ruolo_utente = None
             st.session_state.scanned_code = ""
             st.rerun()
@@ -301,8 +303,10 @@ else:
             qta = st.number_input("Quantità necessaria", min_value=1, step=1, value=1)
             
             st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("Trasmetti Ordine al Reparto", type="primary", use_width=True):
-                if articolo_finale:
+            if st.button("Trasmetti Ordine al Reparto", type="primary", use_container_width=True):
+                if not fogli_connessi:
+                    st.error("Sincronizzazione non disponibile: il database Google Sheets non è connesso.")
+                elif articolo_finale:
                     scheda_rich_nome = MAPPA_SCHEDE[target_magazzino]["richieste"]
                     df_richieste_spec = scarica_da_sheet(scheda_rich_nome)
                     
@@ -366,7 +370,7 @@ else:
                 filtro_art = (df_inventario["id_articolo"].astype(str) == codice_pulito) if not df_inventario.empty else pd.Series([False])
                 
                 if filtro_art.any():
-                    if st.button(f"Incrementa Giacenza (+ {moltiplicatore_qta})", type="primary", use_width=True):
+                    if st.button(f"Incrementa Giacenza (+ {moltiplicatore_qta})", type="primary", use_container_width=True):
                         df_inventario.loc[filtro_art, "giacenza_totale"] = df_inventario.loc[filtro_art, "giacenza_totale"].astype(int) + moltiplicatore_qta
                         carica_su_sheet(df_inventario, scheda_inv_reale)
                         st.success("Giacenza aggiornata nel Cloud Sheet!")
@@ -376,7 +380,7 @@ else:
                     st.warning("Articolo non censito nel database di questo reparto. Registrazione rapida:")
                     with st.form("nuovo_prodotto_form"):
                         nome_nuovo = st.text_input("Nome / Descrizione nuovo articolo:")
-                        if st.form_submit_button("Crea Articolo e Carica Stock", use_width=True):
+                        if st.form_submit_button("Crea Articolo e Carica Stock", use_container_width=True):
                             if nome_nuovo.strip():
                                 nuovo_p = pd.DataFrame([{"magazzino": mag_corrente, "id_articolo": codice_pulito, "nome_articolo": nome_nuovo.strip(), "giacenza_totale": int(moltiplicatore_qta)}])
                                 df_inventario = pd.concat([df_inventario, nuovo_p], ignore_index=True)
@@ -389,7 +393,7 @@ else:
             if not df_inventario.empty:
                 st.dataframe(df_inventario, use_container_width=True, hide_index=True)
             else:
-                st.info("Inventario vuoto o foglio di calcolo non inizializzato.")
+                st.info("In attesa di dati o connessione al database Google Sheets.")
 
         with tab_consegne:
             st.markdown("##### 📋 Richieste Personale d'Istituto")
@@ -405,7 +409,7 @@ else:
                                 st.markdown(f"👤 **{row['collaboratore']}** richiede **{row['quantita']}** pz. di **{row['articolo']}**")
                                 st.caption(f"Inviata il: {row['data_richiesta']}")
                             with col_azione:
-                                if st.button("Approva ed Evadi", key=f"ev_{row['id_richiesta']}", type="primary", use_width=True):
+                                if st.button("Approva ed Evadi", key=f"ev_{row['id_richiesta']}", type="primary", use_container_width=True):
                                     filtro = (df_inventario["nome_articolo"] == row['articolo'])
                                     if filtro.any() and int(df_inventario.loc[filtro, "giacenza_totale"].values[0]) >= int(row['quantita']):
                                         df_inventario.loc[filtro, "giacenza_totale"] = int(df_inventario.loc[filtro, "giacenza_totale"].values[0]) - int(row['quantita'])
@@ -423,7 +427,7 @@ else:
             with st.container(border=True):
                 mat_urgente = st.text_input("Articolo o bene esaurito:")
                 qta_urgente = st.number_input("Quantità pacchi/scatole ordinarie:", min_value=1, step=1, value=1)
-                if st.button("Inoltra Flusso Acquisti", type="primary", use_width=True):
+                if st.button("Inoltra Flusso Acquisti", type="primary", use_container_width=True):
                     if mat_urgente.strip():
                         nuovo_id_a = int(df_approv["id_acquisto"].astype(float).max()) + 1 if not df_approv.empty else 1
                         nuovo_o = pd.DataFrame([{"id_acquisto": nuovo_id_a, "magazzino": mag_corrente, "articolo": mat_urgente.strip(), "quantita_richiesta": int(qta_urgente), "stato": "In attesa", "data_richiesta": datetime.now().strftime("%d/%m/%Y %H:%M")}])
@@ -436,9 +440,9 @@ else:
         with tab_ddt:
             st.markdown("##### 📸 Archiviazione Digitale Documenti di Trasporto")
             with st.container(border=True):
-                file_ddt = st.file_uploader("Upload o Scatto Foto Documento Fischiabile (DDT)", type=["png", "jpg", "jpeg", "pdf"])
-                fornitore = st.text_input("Ditta / Fornitore:");
-                if file_ddt and st.button("Salva in Cloud Drive", type="primary", use_width=True):
+                file_ddt = st.file_uploader("Upload o Scatto Foto Documento Fiscale (DDT)", type=["png", "jpg", "jpeg", "pdf"])
+                fornitore = st.text_input("Ditta / Fornitore:")
+                if file_ddt and st.button("Salva in Cloud Drive", type="primary", use_container_width=True):
                     if fornitore.strip():
                         nome_f = f"DDT_{mag_corrente.replace(' ', '_')}_{fornitore.strip()}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
                         if carica_su_drive(file_ddt.getvalue(), nome_f, file_ddt.type, mag_corrente):
@@ -461,7 +465,7 @@ else:
             if not df_inventario_admin.empty:
                 st.dataframe(df_inventario_admin.sort_values(by="nome_articolo"), use_container_width=True, hide_index=True)
             else:
-                st.info("Nessun articolo caricato.")
+                st.info("Nessun articolo caricato o database non connesso.")
                 
         with tab_ac:
             df_approv_admin = scarica_da_sheet("Ordini")
@@ -478,7 +482,7 @@ else:
                                 st.markdown(f"#### {row['quantita_richiesta']}x {row['articolo']}")
                                 st.caption(f"Inviato il: {row['data_richiesta']}")
                             with c_b:
-                                if st.button("Autorizza Acquisto", key=f"ap_ad_{row['id_acquisto']}", type="primary", use_width=True):
+                                if st.button("Autorizza Acquisto", key=f"ap_ad_{row['id_acquisto']}", type="primary", use_container_width=True):
                                     df_approv_admin.loc[df_approv_admin["id_acquisto"].astype(str) == str(row["id_acquisto"]), "stato"] = "Approvato"
                                     carica_su_sheet(df_approv_admin, "Ordini")
                                     
