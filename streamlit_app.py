@@ -9,12 +9,9 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
-# --- AGGANCIO SICURO E DINAMICO DEL MODULO PREVENTIVI ---
+# --- IMPORTAZIONE SICURA DEL NUOVO MODULO INDEPENDENTE ---
 try:
-    import gestione_preventivi
-    import importlib
-    importlib.reload(gestione_preventivi)
-    mostra_interfaccia_preventivi = gestione_preventivi.mostra_interfaccia_preventivi
+    from gestione_preventivi import mostra_interfaccia_preventivi
     MODULO_PREVENTIVI_DISPONIBILE = True
 except Exception:
     MODULO_PREVENTIVI_DISPONIBILE = False
