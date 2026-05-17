@@ -11,6 +11,7 @@ from email.mime.multipart import MIMEMultipart
 
 # --- IMPORTAZIONE SICURA DEL NUOVO MODULO INDEPENDENTE ---
 try:
+    import gestione_preventivi
     from gestione_preventivi import mostra_interfaccia_preventivi
     MODULO_PREVENTIVI_DISPONIBILE = True
 except Exception:
@@ -306,7 +307,7 @@ def mostra_pad_firma(chiave_id):
     """
     st.components.v1.html(html_pad, height=230)
 
-# --- REINDIRIZZAMENTO RAPIDO PARAMETRI ---
+# --- REINDIRIZZAMENTO E COOLDOWN CONTRO LO SFARFALLIO ---
 query_params = st.query_params
 if "action" in query_params and "id" in query_params:
     azione = query_params["action"]
@@ -317,14 +318,19 @@ if "action" in query_params and "id" in query_params:
         idx_lista = df_f.index[df_f["id_richiesta"] == str(id_req)].tolist()
         if idx_lista:
             idx = idx_lista[0]
-            nuovo_stato = "In lavorazione" if (azione == "approve" and df_f.at[idx, "categoria_bene"] == "PC Notebook") else ("Lavorata" if azione == "approve" else "Rifiutata")
-            df_f.at[idx, "stato"] = nuovo_stato
-            carica_su_sheet(df_f, "Richieste_Preside")
-            if azione == "approve":
-                invia_notifica_approvata_preside(id_req, df_f.at[idx, "email_utente"], df_f.at[idx, "oggetto"], df_f.at[idx, "categoria_bene"])
-                if df_f.at[idx, "categoria_bene"] != "PC Notebook":
-                    invia_notifica_pronto_ritiro(id_req, df_f.at[idx, "email_utente"], df_f.at[idx, "oggetto"])
-            st.success("Decisione registrata!")
+            if df_f.at[idx, "stato"] == "In attesa di approvazione":
+                nuovo_stato = "In lavorazione" if (azione == "approve" and df_f.at[idx, "categoria_bene"] == "PC Notebook") else ("Lavorata" if azione == "approve" else "Rifiutata")
+                df_f.at[idx, "stato"] = nuevo_stato
+                carica_su_sheet(df_f, "Richieste_Preside")
+                if azione == "approve":
+                    invia_notifica_approvata_preside(id_req, df_f.at[idx, "email_utente"], df_f.at[idx, "oggetto"], df_f.at[idx, "categoria_bene"])
+                    if df_f.at[idx, "categoria_bene"] != "PC Notebook":
+                        invia_notifica_pronto_ritiro(id_req, df_f.at[idx, "email_utente"], df_f.at[idx, "oggetto"])
+    
+    # Svuota i parametri URL per spezzare il loop infinito di sfarfallio
+    st.query_params.clear()
+    st.success("Decisione registrata con successo!")
+    st.button("Accedi alla Piattaforma")
     st.stop()
 
 # --- INITIALIZE STATE ---
@@ -339,7 +345,7 @@ if st.session_state.ruolo_utente is None:
     with col_c:
         st.markdown("<h2 style='text-align: center;'>Piattaforma Logistica di Istituto</h2>", unsafe_allow_html=True)
         with st.container(border=True):
-            scelta = st.radio("Seleziona profilo d'accesso:", ["📝 Collaboratore / Alunno / Docente (Invia Richiesta)", "🔑 Staff Magazzino / Amministrazione / Tecnici"])
+            scelta = st.radio("Seleziona profil d'accesso:", ["📝 Collaboratore / Alunno / Docente (Invia Richiesta)", "🔑 Staff Magazzino / Amministrazione / Tecnici"])
             if "Collaboratore" in scelta:
                 nome = st.text_input("Nome e Cognome del Richiedente:")
                 ruolo = st.selectbox("Seleziona il tuo Ruolo:", ["Alunno", "Docente", "Personale ATA", "Collaboratore Scolastico"])
@@ -432,7 +438,7 @@ else:
                     df_rm = scarica_da_sheet("Richieste_Preventivo_Magazzino")
                     id_rm = 2001 if df_rm.empty else int(pd.to_numeric(df_rm["id_richiesta_mag"], errors='coerce').max()) + 1
                     nuovo = pd.DataFrame([{"id_richiesta_mag": id_rm, "data_creazione": datetime.now().strftime("%d/%m/%Y %H:%M"), "magazzino_origine": "Tecnici Informatici", "materiale_richiesto": mat_it, "quantita_esimata": qta_it, "stato_iter": "In attesa di preventivi", "note": note_it}])
-                    carica_su_sheet(pd.concat([df_rm, nuovo], ignore_index=True), "Richieste_Preventivo_Magazzino")
+                    carica_su_sheet(pd.concat([df_rm, nuevo], ignore_index=True), "Richieste_Preventivo_Magazzino")
                     st.success("Richiesta inserita nel registro preventivi admin!")
 
     # ==========================================
