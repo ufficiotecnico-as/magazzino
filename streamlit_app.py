@@ -9,7 +9,8 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
-# --- CONFIGURAZIONE INTERMEDIARIO (GOOGLE APPS SCRIPT) ---\nURL_INTERMEDIARIO_SILENZIOSO = "https://script.google.com/macros/s/AKfycbyXBLjDpJrSGHoUpuspTsNAG9f6lGhF1e8oGyJ8nkY6jZMTJo04zsT_6eLyEybGgv4/exec"
+# --- CONFIGURAZIONE INTERMEDIARIO (GOOGLE APPS SCRIPT) ---
+URL_INTERMEDIARIO_SILENZIOSO = "https://script.google.com/macros/s/AKfycbyXBLjDpJrSGHoUpuspTsNAG9f6lGhF1e8oGyJ8nkY6jZMTJo04zsT_6eLyEybGgv4/exec"
 
 # --- CONTROLLO LIBRERIE ESTERNE ---
 try:
@@ -173,9 +174,9 @@ def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione, 
     pdf.ln(6)
     
     pdf.set_font("Times", "B", 10)
-    pdf.cell(95, 5, "")
+    pdf.cell(95, 5)
     pdf.cell(85, 5, "Ai Docenti / Al Personale Interessato", ln=True, align="L")
-    pdf.cell(95, 5, "")
+    pdf.cell(95, 5)
     pdf.cell(85, 5, pulisci_caratteri_fpdf(f"Sig./Sigg. {nome} ({ruolo})"), ln=True, align="L")
     pdf.ln(8)
     
@@ -194,7 +195,7 @@ def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione, 
     pdf.set_font("Times", "", 10)
     if tipo_operazione == "CONSEGNA":
         corpo_testo = (
-            f"Con la presente si attesta che in data odierna l'Amministrazione dell'Istituto Superiorer\n"
+            f"Con la presente si attesta che in data odierna l'Amministrazione dell'Istituto Superiore\n"
             f"Antonio Scarpa provvede alla consegna in comodato d'uso del bene sotto specificato al richiedente indicato.\n\n"
             f"Dettaglio del Bene Assegnato:\n"
             f"- Identificativo / Seriale: {bene}\n\n"
@@ -272,7 +273,7 @@ def carica_su_drive_unico(file_bytes, nome_file, mime_type, nome_cartella_dest):
         return True
     except Exception: return None
 
-# --- APPS SCRIPT SILENT DISPATCHER ---
+# --- APPS SCRIPT SILENT DISPATCHER (GESTIONE EMAIL NOTIFICHE) ---
 def invia_notifica_silenziosa_gas(payload):
     try: requests.post(URL_INTERMEDIARIO_SILENZIOSO, json=payload, timeout=8)
     except Exception: pass
@@ -571,31 +572,82 @@ else:
                                 st.rerun()
 
     # ==========================================
-    # WORKFLOW 4: INTERFACCIA COLLABORATORI (INSERIMENTO TICKET RICHIESTE)
+    # WORKFLOW 4: INTERFACCIA COLLABORATORI (DIVISIONE MATRICI RICHIESTE)
     # ==========================================
     elif st.session_state.ruolo_utente == "collaboratore":
-        st.markdown(f"### Benvenuto {st.session_state.utente_corrente}")
-        st.markdown("Invia una nuova richiesta di prelievo o materiale ai diversi reparti logistici della scuola.")
+        st.markdown(f"### Benvenuto Area Risorse, {st.session_state.utente_corrente}")
         
-        with st.form("nuova_richiesta_collab"):
-            mag_dest = st.selectbox("Seleziona il Magazzino di Destinazione:", LISTA_MAGAZZINI)
-            art_richiesto = st.text_input("Descrizione dell'articolo o materiale richiesto:")
-            qta_richiesta = st.number_input("Quantità necessaria:", min_value=1, value=1, step=1)
-            note_richiesta = st.text_area("Eventuali note o specifiche aggiuntive:")
-            
-            if st.form_submit_button("Invia Richiesta al Magazzino", use_container_width=True):
-                if art_richiesto.strip():
-                    df_dest = scarica_da_sheet(MAPPA_SCHEDE[mag_dest]["richieste"])
-                    nuovo_ticket = pd.DataFrame([{
-                        "richiedente": st.session_state.utente_corrente,
-                        "articolo": art_richiesto.strip(),
-                        "quantita": str(qta_richiesta),
-                        "data": datetime.now().strftime("%d/%m/%Y %H:%M"),
-                        "stato": "In Lavorazione",
-                        "note": note_richiesta.strip()
-                    }])
-                    df_dest = pd.concat([df_dest, nuovo_ticket], ignore_index=True)
-                    carica_su_sheet(df_dest, MAPPA_SCHEDE[mag_dest]["richieste"])
-                    st.success(f"Ticket inviato con successo al reparto {mag_dest}!")
-                else:
-                    st.error("Inserisci l'articolo prima di inviare.")
+        tipo_richiesta_utente = st.radio(
+            "Seleziona la tipologia di richiesta da inoltrare:",
+            ["📋 Richiesta Dispositivi in Comodato d'Uso (Docenti / Alunni)", "📦 Richiesta Materiali e Consumabili Standard (Personale ATA / Officina)"],
+            help="Scegli accuratamente il canale per instradare la pratica al reparto logistico preposto."
+        )
+        
+        # SOTTO-FLUSSO A: COMODATI D'USO (Richiede validazione e invia mail alla Dirigente con Token)
+        if tipo_richiesta_utente == "📋 Richiesta Dispositivi in Comodato d'Uso (Docenti / Alunni)":
+            st.markdown("#### Compilazione Istanza Elettronica per l'Assegnazione di un Bene d'Istituto")
+            with st.form("form_istanza_comodato"):
+                t_sog = st.selectbox("Ruolo del Richiedente:", ["Insegnante / Personale Interno", "Alunno", "Genitore / Tutore Legale"])
+                mail_sog = st.text_input("Indirizzo E-mail Istituzionale per le comunicazioni:")
+                cat_bene = st.selectbox("Categoria del Dispositivo:", ["PC Notebook", "Chiave d'Accesso"])
+                mot_bene = st.text_area("Motivazione dettagliata a supporto della richiesta:")
+                
+                if st.form_submit_button("Invia Richiesta Formale alla Dirigente", use_container_width=True):
+                    if mail_sog.strip() and mot_bene.strip():
+                        df_ist_c = scarica_da_sheet("Istanze_Comodati")
+                        stamp = datetime.now().strftime("%d/%m/%Y %H:%M")
+                        id_ist = f"IST-{datetime.now().strftime('%M%S')}"
+                        token_sicurezza = f"TK-{base64.b64encode(id_ist.encode()).decode()[:10].upper()}"
+                        
+                        nuova_istanza = pd.DataFrame([{
+                            "id_istanza": id_ist,
+                            "timestamp": stamp,
+                            "nominativo": st.session_state.utente_corrente,
+                            "tipo_soggetto": t_sog,
+                            "email": mail_sog.strip(),
+                            "categoria_bene": cat_bene,
+                            "motivazione": mot_bene.strip(),
+                            "stato": "In attesa di Dirigente",
+                            "token_approvazione": token_sicurezza
+                        }])
+                        carica_su_sheet(pd.concat([df_ist_c, nuova_istanza], ignore_index=True), "Istanze_Comodati")
+                        
+                        # INVIO PAYLOAD ALL'INTERMEDIARIO PER DISPACCIAMENTO MAIL ALLA DIRIGENTE
+                        payload_notifica = {
+                            "azione": "nuova_istanza",
+                            "id_istanza": id_ist,
+                            "richiedente": st.session_state.utente_corrente,
+                            "ruolo": t_sog,
+                            "email_richiedente": mail_sog.strip(),
+                            "bene": cat_bene,
+                            "motivazione": mot_bene.strip(),
+                            "token": token_sicurezza
+                        }
+                        invia_notifica_silenziosa_gas(payload_notifica)
+                        
+                        st.success(f"Istanza {id_ist} inviata correttamente. Il sistema ha inoltrato la mail di notifica alla Dirigente per l'approvazione rapida.")
+                    else: st.error("Tutti i campi del modulo sono obbligatori.")
+                    
+        # SOTTO-FLUSSO B: MATERIALI STANDARD (Inoltro diretto ai magazzini senza filtro Dirigente)
+        else:
+            st.markdown("#### Richiesta Fornitura Materiali Standard")
+            with st.form("nuova_richiesta_standard"):
+                mag_dest = st.selectbox("Seleziona il Magazzino di Destinazione:", ["Personale ATA", "Officina"])
+                art_richiesto = st.text_input("Descrizione dell'articolo o materiale richiesto:")
+                qta_richiesta = st.number_input("Quantità necessaria:", min_value=1, value=1, step=1)
+                note_richiesta = st.text_area("Eventuali note o specifiche aggiuntive:")
+                
+                if st.form_submit_button("Invia Richiesta al Magazzino", use_container_width=True):
+                    if art_richiesto.strip():
+                        df_dest = scarica_da_sheet(MAPPA_SCHEDE[mag_dest]["richieste"])
+                        nuovo_ticket = pd.DataFrame([{
+                            "richiedente": st.session_state.utente_corrente,
+                            "articolo": art_richiesto.strip(),
+                            "quantita": str(qta_richiesta),
+                            "data": datetime.now().strftime("%d/%m/%Y %H:%M"),
+                            "stato": "In Lavorazione",
+                            "note": note_richiesta.strip()
+                        }])
+                        carica_su_sheet(pd.concat([df_dest, nuovo_ticket], ignore_index=True), "Richieste")
+                        st.success(f"Richiesta inviata ed inserita nel registro logistico del reparto: {mag_dest}!")
+                    else: st.error("Inserisci l'articolo prima di procedere.")
