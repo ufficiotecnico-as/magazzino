@@ -121,7 +121,7 @@ def carica_su_sheet(df, nome_scheda):
     except Exception: pass
 
 
-# --- CLASSE PDF OTTIMIZZATA PER PAGINA SINGOLA ---
+# --- CLASSE PDF ANTISOPRAVVOLO E COMPATTA ---
 class PDFMinisteriale(FPDF):
     def footer(self):
         self.set_y(-20)
@@ -137,7 +137,20 @@ class PDFMinisteriale(FPDF):
         self.cell(180, 3, "Documento informatico firmato digitalmente ai sensi del D.Lgs 82/2005 CAD art.45, ss.mm.ii e norme collegate.", ln=True, align="C")
 
 
-# --- GENERAZIONE PDF COMPATTA E EQUILIBRATA ---
+def pulisci_caratteri_fpdf(testo):
+    """Sostituisce i caratteri Unicode non supportati dai font standard di FPDF standard."""
+    mappa = {
+        chr(224): "a'", chr(232): "e'", chr(233): "e'", chr(236): "i'", chr(242): "o'", chr(249): "u'",
+        "à": "a'", "è": "e'", "é": "e'", "ì": "i'", "ò": "o'", "ù": "u'",
+        "’": "'", "“": '"', "”": '"', "–": "-", "—": "-"
+    }
+    for k, v in mappa.items():
+        testo = testo.replace(k, v)
+    # Rimuove forzatamente qualsiasi codifica non-latin1 residua per evitare crash
+    return testo.encode('raw_unicode_escape').decode('utf-8').encode('latin1', 'replace').decode('latin1')
+
+
+# --- GENERAZIONE PDF EQUILIBRATA E SICURA DA CRASH ---
 def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione, firma_base64=None, utente_loggato="Ufficio Tecnico"):
     if not FPDF_AVAILABLE:
         return b"Errore libreria PDF"
@@ -147,30 +160,31 @@ def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione, 
     pdf.set_auto_page_break(auto=True, margin=22) 
     pdf.add_page()
     
-    # 1. Intestazione Istituzionale
+    # 1. Intestazione Istituzionale sicura
     try:
         pdf.image(URL_LOGO, x=15, y=10, w=180)
-        pdf.ln(12)  
+        # Spostiamo il cursore Y precisamente sotto l'altezza stimata del logo per evitare sovrapposizioni latenti
+        pdf.set_y(32)
     except Exception:
         pdf.set_font("Times", "B", 13)
         pdf.cell(180, 6, "ISISS ANTONIO SCARPA", ln=True, align="C")
-        pdf.ln(4)
+        pdf.ln(5)
         
     # 2. Segnatura / Protocollo e Data locale
     pdf.set_font("Times", "", 10)
     data_corrente = data.split(" ")[0] if " " in data else data
     
     pdf.cell(90, 5, "Protocollo n. (vedi segnatura)", ln=False, align="L")
-    pdf.cell(90, 5, f"Motta di Livenza, {data_corrente}", ln=True, align="R")
-    pdf.ln(4)
+    pdf.cell(90, 5, pulisci_caratteri_fpdf(f"Motta di Livenza, {data_corrente}"), ln=True, align="R")
+    pdf.ln(6)
     
     # 3. Destinatario
     pdf.set_font("Times", "B", 10)
     pdf.cell(95, 5, "", ln=False)
     pdf.cell(85, 5, "Ai Docenti / Al Personale Interessato", ln=True, align="L")
     pdf.cell(95, 5, "", ln=False)
-    pdf.cell(85, 5, f"Sig./Sigg. {nome} ({ruolo})", ln=True, align="L")
-    pdf.ln(5)
+    pdf.cell(85, 5, pulisci_caratteri_fpdf(f"Sig./Sigg. {nome} ({ruolo})"), ln=True, align="L")
+    pdf.ln(8)
     
     # 4. Oggetto Strutturato
     pdf.set_font("Times", "B", 10)
@@ -182,11 +196,10 @@ def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione, 
     else:
         testo_oggetto = f"Ricevuta di Riconsegna, Scarico Logistico e Cessazione Comodato d'Uso - Registro ID {id_contratto}."
     
-    testo_oggetto = testo_oggetto.replace("’", "'").replace("“", '"').replace("”", '"')
-    pdf.multi_cell(158, 5, testo_oggetto)
-    pdf.ln(5)
+    pdf.multi_cell(158, 5, pulisci_caratteri_fpdf(testo_oggetto))
+    pdf.ln(8)
     
-    # 5. Corpo del Testo (Interlinea proporzionata)
+    # 5. Corpo del Testo pulito dagli accenti non supportati
     pdf.set_font("Times", "", 10)
     if tipo_operazione == "CONSEGNA":
         corpo_testo = (
@@ -209,11 +222,10 @@ def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione, 
             f"l'operazione di scarico logistico dal registro dei comodati attivi."
         )
         
-    corpo_testo = corpo_testo.replace("’", "'").replace("“", '"').replace("”", '"')
-    pdf.multi_cell(180, 6, corpo_testo, align="J")
+    pdf.multi_cell(180, 6, pulisci_caratteri_fpdf(corpo_testo), align="J")
     
-    # 6. Blocco Firme ad Ancoraggio Fisso Inferiore (Risolve lo spazio vuoto a metà pagina)
-    pdf.set_y(-65)
+    # 6. Blocco Firme bilanciato e ancorato stabilmente sul fondo
+    pdf.set_y(-60)
     
     pdf.set_font("Times", "B", 10)
     y_posizione_firme = pdf.get_y()
@@ -240,7 +252,7 @@ def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione, 
             sfondo_bianco.convert("RGB").save(img_buffer, format="JPEG", quality=95)
             img_buffer.seek(0)
             
-            # h=0 assicura il calcolo proporzionale automatico della firma senza distorsioni
+            # h=0 assicura il perfetto mantenimento proporzionale
             pdf.image(img_buffer, x=115, y=y_posizione_firme + 5, w=50, h=0)
         except Exception:
             pdf.cell(80, 5, "[Firma Digitale Acquisita]", align="L", ln=True)
@@ -483,7 +495,6 @@ else:
                                 st.markdown(f"📦 Oggetto: **{riga['id_bene']}** affidato a **{riga['nominativo']}** ({riga['tipo_soggetto']})")
                                 st.caption(f"Assegnatario il: {riga['data_consegna']} | ID Contratto: {riga['id_comodato']}")
                             with c2:
-                                # Modulo Riconsegna specchiato e stabile
                                 with st.expander("Esegui Riconsegna ↩"):
                                     st.markdown("#### 🖊️ Acquisizione Firma Digitale (Riconsegna):")
                                     metodo_firma_ric = st.radio("Scegli come apporre la firma per la riconsegna:", ["✍️ Disegna Firma Digitale", "🖼️ Carica immagine"], key=f"metodo_ric_{riga['id_comodato']}")
