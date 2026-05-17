@@ -376,7 +376,9 @@ else:
                     
                     st.markdown("#### 🖊️ Acquisizione Firma Digitale (Consegna):")
                     
-                    # Pad HTML5 nativo con comunicazione immediata a Streamlit
+                    # Interfaccia di input ufficiale che riceve la firma dal canvas HTML5 tramite DOM
+                    firma_base64_consegna = st.text_input("Dati Firma di Consegna (Generati Automaticamente)", key="input_firma_consegna", type="password", help="Firma all'interno del riquadro tratteggiato qui sotto")
+                    
                     html_pad_consegna = """
                     <div style="background: #ffffff; border: 2px dashed #cbd5e1; padding: 10px; border-radius: 8px; max-width:470px;">
                         <canvas id="canvas_consegna" width="450" height="150" style="border:1px solid #64748b; background:#ffffff; cursor:crosshair; touch-action: none; border-radius:4px;"></canvas>
@@ -403,7 +405,15 @@ else:
 
                         function inviaAStreamlit() {
                             var dataUrl = canvas.toDataURL('image/png');
-                            window.parent.postMessage({type: 'streamlit:setComponentValue', value: dataUrl}, '*');
+                            // Trova l'elemento input di Streamlit nella pagina superiore e vi scrive i dati
+                            var inputs = window.parent.document.getElementsByTagName('input');
+                            for (var i = 0; i < inputs.length; i++) {
+                                if (inputs[i].getAttribute('aria-label') && inputs[i].getAttribute('aria-label').includes('Firma di Consegna')) {
+                                    inputs[i].value = dataUrl;
+                                    inputs[i].dispatchEvent(new Event('input', { bubbles: true }));
+                                    break;
+                                }
+                            }
                         }
 
                         canvas.addEventListener('mousedown', function(e) { isDrawing = true; var p = getCoord(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); });
@@ -416,19 +426,25 @@ else:
 
                         function pulisciConsegna() { 
                             ctx.clearRect(0, 0, canvas.width, canvas.height);
-                            window.parent.postMessage({type: 'streamlit:setComponentValue', value: ''}, '*');
+                            var inputs = window.parent.document.getElementsByTagName('input');
+                            for (var i = 0; i < inputs.length; i++) {
+                                if (inputs[i].getAttribute('aria-label') && inputs[i].getAttribute('aria-label').includes('Firma di Consegna')) {
+                                    inputs[i].value = '';
+                                    inputs[i].dispatchEvent(new Event('input', { bubbles: true }));
+                                    break;
+                                }
+                            }
                         }
                     </script>
                     """
-                    
-                    firma_base64_consegna = st.components.v1.html(html_pad_consegna, height=210, key="pad_consegna_nuova")
+                    st.components.v1.html(html_pad_consegna, height=210)
 
                     if st.button("🚀 Approva, Genera Verbale e Salva PDF su Google Drive", type="primary", use_container_width=True):
                         nome_pulito = nom_sog.strip()
                         if not nome_pulito:
                             st.error("Errore: Compila il campo 'Nome e Cognome dell'Assegnatario'.")
-                        elif not firma_base64_consegna:
-                            st.error("⚠️ Attenzione: Firma mancante. Disegna la firma nel riquadro prima di salvare.")
+                        elif not firma_base64_consegna or len(firma_base64_consegna) < 100:
+                            st.error("⚠️ Attenzione: Firma mancante o non rilevata. Disegna la firma nel riquadro bianco prima di salvare.")
                         else:
                             with st.spinner("Generazione del documento..."):
                                 id_com = int(df_reg_comodati["id_comodato"].astype(float).max()) + 1 if not df_reg_comodati.empty else 1001
@@ -467,7 +483,9 @@ else:
                                 with st.expander("Esegui Riconsegna / Scarico ↩"):
                                     st.markdown("**✍️ Firma per la Riconsegna:**")
                                     
-                                    # Pad HTML5 di riconsegna con identificativo dinamico corretto
+                                    # Input text Streamlit associato univocamente al contratto corrente per raccogliere il base64
+                                    firma_base64_ric = st.text_input(f"Dati Riconsegna {riga['id_comodato']}", key=f"input_ric_{riga['id_comodato']}", type="password", help="Apponi la firma nel pad sottostante")
+                                    
                                     html_pad_ric = f"""
                                     <div style="background: #ffffff; border: 2px dashed #cbd5e1; padding: 10px; border-radius: 8px; max-width:320px;">
                                         <canvas id="canvas_ric_{riga['id_comodato']}" width="300" height="120" style="border:1px solid #64748b; background:#ffffff; cursor:crosshair; touch-action: none; border-radius:4px;"></canvas>
@@ -494,7 +512,14 @@ else:
 
                                         function inviaAStreamlit() {{
                                             var dataUrl = canvas.toDataURL('image/png');
-                                            window.parent.postMessage({{type: 'streamlit:setComponentValue', value: dataUrl}}, '*');
+                                            var inputs = window.parent.document.getElementsByTagName('input');
+                                            for (var i = 0; i < inputs.length; i++) {{
+                                                if (inputs[i].getAttribute('aria-label') && inputs[i].getAttribute('aria-label').includes('Dati Riconsegna {riga['id_comodato']}')) {{
+                                                    inputs[i].value = dataUrl;
+                                                    inputs[i].dispatchEvent(new Event('input', {{ bubbles: true }}));
+                                                    break;
+                                                }}
+                                            }}
                                         }}
 
                                         canvas.addEventListener('mousedown', function(e) {{ isDrawing = true; var p = getCoord(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); }});
@@ -507,15 +532,21 @@ else:
 
                                         function pulisciRic_{riga['id_comodato']}() {{ 
                                             ctx.clearRect(0, 0, canvas.width, canvas.height);
-                                            window.parent.postMessage({{type: 'streamlit:setComponentValue', value: ''}}, '*');
+                                            var inputs = window.parent.document.getElementsByTagName('input');
+                                            for (var i = 0; i < inputs.length; i++) {{
+                                                if (inputs[i].getAttribute('aria-label') && inputs[i].getAttribute('aria-label').includes('Dati Riconsegna {riga['id_comodato']}')) {{
+                                                    inputs[i].value = '';
+                                                    inputs[i].dispatchEvent(new Event('input', {{ bubbles: true }}));
+                                                    break;
+                                                }}
+                                            }}
                                         }}
                                     </script>
                                     """
-                                    
-                                    firma_base64_ric = st.components.v1.html(html_pad_ric, height=180, key=f"pad_ric_{riga['id_comodato']}")
+                                    st.components.v1.html(html_pad_ric, height=180)
                                         
                                     if st.button("Conferma Rientro e Archivia ↩", key=f"btn_ric_{riga['id_comodato']}", type="primary", use_container_width=True):
-                                        if not firma_base64_ric:
+                                        if not firma_base64_ric or len(firma_base64_ric) < 100:
                                             st.error("⚠️ La firma di riconsegna è obbligatoria per chiudere la pratica.")
                                         else:
                                             with st.spinner("Salvataggio e chiusura contratto..."):
