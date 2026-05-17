@@ -6,7 +6,8 @@ import base64
 from PIL import Image
 
 # --- CONFIGURAZIONE INTERMEDIARIO SILENZIOSO (GOOGLE APPS SCRIPT) ---
-URL_INTERMEDIARIO_SILENZIOSO = "https://script.google.com/a/macros/antonioscarpa.edu.it/s/AKfycbzD8WgECLYhKVM6TrDe4QwaFafRCWKFg9lc4YZglYclVUQA6Z2pX2h1L0J23-cqhgEr/exec"
+# Aggiornato con il nuovo link fornito:
+URL_INTERMEDIARIO_SILENZIOSO = "https://script.google.com/macros/s/AKfycbxW220zdCHbciiv4LQCsI1e7lLEnQ1bIswfckQYyKwncfeN9Ho45nNXQO8vyCK6y4og/exec"
 
 # --- CONTROLLO LIBRERIE ESTERNE ---
 try:
@@ -467,7 +468,6 @@ else:
                     if st.button("🚀 Salva Contratto", type="primary", use_container_width=True):
                         if nom_sog.strip() and firma_base64_finale:
                             with st.spinner("Salvataggio..."):
-                                # --- FIX CORREZIONE KEYERROR: CAMBIATO df_registro IN df_reg_comodati E id_richiesta IN id_comodato ---
                                 id_comodato_numerico = pd.to_numeric(df_reg_comodati["id_comodato"], errors='coerce')
                                 id_com = int(id_comodato_numerico.max()) + 1 if not id_comodato_numerico.dropna().empty else 1001
                                 data_ora = datetime.now().strftime("%d/%m/%Y %H:%M")
