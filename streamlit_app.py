@@ -9,12 +9,12 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
-# --- IMPORTAZIONE DEL NUOVO MODULO INDIPENDENTE (STEP 1) ---
+# --- IMPORTAZIONE SICURA DEL NUOVO MODULO INDIPENDENTE ---
 try:
     from gestione_preventivi import mostra_interfaccia_preventivi
-except ImportError:
-    # Evita il blocco totale dell'app se il secondo file non è ancora presente su GitHub
-    mostra_interfaccia_preventivi = None
+    MODULO_PREVENTIVI_DISPONIBILE = True
+except ModuleNotFoundError:
+    MODULO_PREVENTIVI_DISPONIBILE = False
 
 # --- CONFIGURAZIONE INTERMEDIARIO (GOOGLE APPS SCRIPT) ---
 URL_INTERMEDIARIO_SILENZIOSO = "https://script.google.com/macros/s/AKfycbyXBLjDpJrSGHoUpuspTsNAG9f6lGhF1e8oGyJ8nkY6jZMTJo04zsT_6eLyEybGgv4/exec"
@@ -492,7 +492,7 @@ else:
                     "📦 Giacenza dei Magazzini",
                     "📋 Richieste Personale ATA",
                     "🔄 Gestione Comodati d'Uso",
-                    "📊 Gestione Preventivi e Fornitori" # <-- VOCE AGGIUNTA
+                    "📊 Gestione Preventivi e Fornitori"  # <-- VOCE INTEGRATA CON SUCCESSO
                 ]
             )
             st.divider()
@@ -610,10 +610,9 @@ else:
             with tab_tutti_comodati: st.dataframe(scarica_da_sheet("Inventario_Comodati"), use_container_width=True, hide_index=True)
             with tab_registro_completo: st.dataframe(df_istanze, use_container_width=True, hide_index=True)
 
-        # --- SEZIONE 4: GESTIONE PREVENTIVI INTEGRATA (ESTERNA) ---
+        # --- SEZIONE 4: GESTIONE PREVENTIVI INTEGRATA ---
         elif sezione_selezionata == "📊 Gestione Preventivi e Fornitori":
-            if mostra_interfaccia_preventivi is not None:
-                # Esegue l'interfaccia prelevandola dal file esterno dedicato
+            if MODULO_PREVENTIVI_DISPONIBILE:
                 mostra_interfaccia_preventivi(
                     scarica_da_sheet, 
                     carica_su_sheet, 
@@ -622,7 +621,7 @@ else:
                     df_istanze
                 )
             else:
-                st.error("⚠️ Errore: Il file 'gestione_preventivi.py' non è stato trovato nella cartella del progetto.")
+                st.info("ℹ️ Il modulo preventivi è configurato, ma il file `gestione_preventivi.py` non è ancora stato creato o caricato nella cartella.")
 
     # ==========================================
     # WORKFLOW 4: ALTRI MAGAZZINI (ATA O STANDARD)
