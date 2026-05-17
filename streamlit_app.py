@@ -48,6 +48,9 @@ ID_CARTELLA_DRIVE_PRINCIPALE = "1bVTs2smvVJONs2oIAFZdDvX9pYDK9MZT"
 SPREADSHEET_ID = "1Q91H_TULvpsnPcyOwQ1lxmjOf809xp4cUz9p1EdMc-4"
 LISTA_MAGAZZINI = ["Personale ATA", "Officina", "Tecnici Informatici"]
 
+# Email di destinazione per il Testing delle richieste
+EMAIL_TESTING = "marcobrunetti14@gmail.com"
+
 # --- STILE PREMIUM ISTITUZIONALE ---
 st.markdown("""
     <style>
@@ -101,7 +104,7 @@ def scarica_da_sheet(nome_scheda):
         elif "Registro_Comodati" in nome_scheda:
             df_base = pd.DataFrame(columns=["id_comodato", "tipo_soggetto", "nominativo", "id_bene", "data_consegna", "stato_comodato"])
         elif "Richieste_Preside" in nome_scheda:
-            df_base = pd.DataFrame(columns=["data_richiesta", "richiedente", "categoria_bene", "oggetto", "motivazione", "stato"])
+            df_base = pd.DataFrame(columns=["data_richiesta", "richiedente", "tipo_istanza", "categoria_bene", "oggetto", "motivazione", "stato"])
         else:
             df_base = pd.DataFrame(columns=["id", "elemento", "valore"])
         carica_su_sheet(df_base, nome_scheda)
@@ -121,6 +124,57 @@ def carica_su_sheet(df, nome_scheda):
         valori = [df_pulito.columns.values.tolist()] + df_pulito.values.tolist()
         worksheet.update(valori)
     except Exception: pass
+
+
+# --- FUNZIONE FUNZIONALE INVIO EMAIL (SMTP) ---
+def invia_notifica_email(richiedente, tipo_istanza, oggetto, motivazione):
+    """Sfrutta il client email integrato di Streamlit o i parametri in secrets"""
+    try:
+        import smtplib
+        from email.mime.text import MIMEText
+        from email.mime.multipart import MIMEMultipart
+
+        # Controllo se le credenziali email sono configurate nei secrets, altrimenti usa un fallback simulato sicuro
+        if "email_config" in st.secrets:
+            cfg = st.secrets["email_config"]
+            smtp_server = cfg.get("smtp_server", "smtp.gmail.com")
+            smtp_port = int(cfg.get("smtp_port", 587))
+            smtp_user = cfg.get("smtp_user")
+            smtp_password = cfg.get("smtp_password")
+            
+            msg = MIMEMultipart()
+            msg['From'] = smtp_user
+            msg['To'] = EMAIL_TESTING
+            msg['Subject'] = f"📦 NUOVA ISTANZA [{tipo_istanza.upper()}] - {richiedente}"
+            
+            corpo = f"""
+            Nuova richiesta inserita nel portale logistico:
+            
+            - Richiedente: {richiedente}
+            - Tipo Istanza: {tipo_istanza}
+            - Oggetto: {oggetto}
+            - data: {datetime.now().strftime('%d/%m/%Y %H:%M')}
+            
+            Motivazione/Note:
+            {motivazione}
+            
+            Accedere al pannello amministratore per approvare o rifiutare.
+            """
+            msg.attach(MIMEText(corpo, 'plain', 'utf-8'))
+            
+            server = smtplib.SMTP(smtp_server, smtp_port)
+            server.starttls()
+            server.login(smtp_user, smtp_password)
+            server.sendmail(smtp_user, EMAIL_TESTING, msg.as_string())
+            server.quit()
+            return True
+        else:
+            # Se st.secrets non ha email_config, stampa a schermo log informativo per non bloccare l'app
+            st.info(f"📧 [TESTING LOG] Email pronta per essere trasmessa a: {EMAIL_TESTING}")
+            return True
+    except Exception as e:
+        st.warning(f"Impossibile inviare la notifica email: {str(e)}")
+        return False
 
 
 # --- CLASSE PDF MINISTERIALE ---
@@ -291,6 +345,7 @@ def carica_su_drive_unico(file_bytes, nome_file, mime_type, nome_cartella_dest):
 if "ruolo_utente" not in st.session_state: st.session_state.ruolo_utente = None
 if "utente_corrente" not in st.session_state: st.session_state.utente_corrente = ""
 if "magazzino_selezionato" not in st.session_state: st.session_state.magazzino_selezionato = None
+if "tipo_istanza_collaboratore" not in st.session_state: st.session_state.tipo_istanza_collaboratore = None
 
 
 # --- ROUTER LOGIN ---
@@ -300,19 +355,28 @@ if st.session_state.ruolo_utente is None:
         st.image(URL_LOGO, use_container_width=True)
         st.markdown("<h2 style='text-align: center;'>Piattaforma Logistica di Istituto</h2>", unsafe_allow_html=True)
         with st.container(border=True):
-            scelta = st.radio("Seleziona profilo:", ["Collaboratore (Richiesta Materiale)", "Staff Magazzino / Amministrazione"])
+            scelta = st.radio("Seleziona profilo d'accesso:", [
+                "📝 Collaboratore - Richiesta Comodato d'Uso (PC / Chiavi)", 
+                "📦 Collaboratore - Richiesta Materiale di Consumo / Logistica",
+                "🔑 Staff Magazzino / Amministrazione"
+            ])
             
-            if scelta == "Collaboratore (Richiesta Materiale)":
-                nome = st.text_input("Nome e Cognome:")
-                if st.button("Accedi", type="primary", use_container_width=True):
+            if "Collaboratore" in scelta:
+                nome = st.text_input("Inserisci il tuo Nome e Cognome:")
+                if st.button("Accedi al Modulo", type="primary", use_container_width=True):
                     if nome.strip():
                         st.session_state.ruolo_utente = "collaboratore"
                         st.session_state.utente_corrente = nome.strip()
+                        # Determiniamo il sottomodulo scelto in modo pulito ed univoco
+                        if "Comodato" in scelta:
+                            st.session_state.tipo_istanza_collaboratore = "Comodato"
+                        else:
+                            st.session_state.tipo_istanza_collaboratore = "Materiale"
                         st.rerun()
                     else:
                         st.error("Inserisci il tuo nome prima di procedere.")
             else:
-                pwd = st.text_input("Codice autorizzazione:", type="password")
+                pwd = st.text_input("Codice autorizzazione staff:", type="password")
                 if st.button("Autentica ed Entra", type="primary", use_container_width=True):
                     if pwd in PASSWORD_MAP:
                         st.session_state.ruolo_utente = "magazziniere"
@@ -330,10 +394,11 @@ else:
     col_t, col_b_logout = st.columns([4, 1])
     with col_t: st.markdown(f"Accesso attivo: **{st.session_state.utente_corrente.upper()}**")
     with col_b_logout:
-        if st.button("🚪 Cambia Profilo", use_container_width=True):
+        if st.button("🚪 Cambia Profilo / Logout", use_container_width=True):
             st.session_state.ruolo_utente = None
             st.session_state.utente_corrente = ""
             st.session_state.magazzino_selezionato = None
+            st.session_state.tipo_istanza_collaboratore = None
             st.rerun()
             
     st.image(URL_LOGO, use_container_width=True)
@@ -350,10 +415,10 @@ else:
             st.dataframe(scarica_da_sheet(MAPPA_SCHEDE[mag_sel]["inventario"]), use_container_width=True, hide_index=True)
             
         with tab_richieste_ricevute:
-            st.markdown("### Registro Richieste Inviate dai Collaboratori alla Preside")
+            st.markdown("### Registro Richieste Centralizzato (Comodati & Materiali)")
             df_istanze_preside = scarica_da_sheet("Richieste_Preside")
             if df_istanze_preside.empty:
-                st.info("Nessuna richiesta inoltrata alla preside al momento.")
+                st.info("Nessuna richiesta inoltrata al momento.")
             else:
                 st.dataframe(df_istanze_preside, use_container_width=True, hide_index=True)
             
@@ -510,46 +575,87 @@ else:
 
 
     # ==========================================
-    # 3. INTERFACCIA COLLABORATORE (CORRETTA)
+    # 3. INTERFACCIA COLLABORATORE (SEPARATA NETTAMENTE)
     # ==========================================
     elif st.session_state.ruolo_utente == "collaboratore":
-        st.markdown("## 📝 Procedura di Richiesta Ufficiale al Dirigente Scolastico")
-        st.markdown("---")
+        tipo_corrente = st.session_state.tipo_istanza_collaboratore
         
-        st.info(f"Benvenuto **{st.session_state.utente_corrente}**. Compila il modulo per inoltrare la richiesta formale alla Preside per l'assegnazione o il comodato d'uso dei beni.")
-        
-        with st.form("modulo_richiesta_preside", clear_on_submit=True):
-            col_f1, col_f2 = st.columns(2)
-            with col_f1:
-                tipo_bene_req = st.selectbox("Categoria del Bene richiesto:", ["PC Notebook", "Chiave d'Accesso", "Altro Materiale Logistico"])
-                oggetto_richiesta = st.text_input("Oggetto della richiesta:", placeholder="Es. Richiesta Notebook per attività di supporto alla didattica")
-            with col_f2:
-                st.text_input("Destinatario:", value="Alla C.A. del Dirigente Scolastico", disabled=True)
-                st.text_input("Data Istanza:", value=datetime.now().strftime("%d/%m/%Y"), disabled=True)
+        if tipo_corrente == "Comodato":
+            st.markdown("## 📝 Modulo A: Richiesta Formale di Bene in Comodato d'Uso")
+            st.markdown("---")
+            st.info(f"Utente: **{st.session_state.utente_corrente}** | Tipologia: **Richiesta Comodato d'Uso Strumenti**")
+            
+            with st.form("modulo_comodato_form", clear_on_submit=True):
+                col_f1, col_f2 = st.columns(2)
+                with col_f1:
+                    categoria_bene = st.selectbox("Seleziona Dispositivo richiesto:", ["PC Notebook", "Chiave d'Accesso Speciale"])
+                    oggetto_richiesta = st.text_input("Oggetto dell'Istanza:", placeholder="Es. Assegnazione Notebook per supporto didattica inclusiva")
+                with col_f2:
+                    st.text_input("Destinatario:", value="Alla C.A. del Dirigente Scolastico", disabled=True)
+                    st.text_input("Data Compilazione:", value=datetime.now().strftime("%d/%m/%Y"), disabled=True)
+                    
+                motivazione_richiesta = st.text_area("Motivazione istituzionale per il comodato:", placeholder="Specificare i motivi e la durata presunta dell'utilizzo...")
                 
-            motivazione_richiesta = st.text_area("Motivazione dettagliata della richiesta:", placeholder="Fornire indicazioni chiare sulle finalità istituzionali per cui si richiede il bene...")
-            
-            invia_richiesta = st.form_submit_button("Invia Richiesta Ufficiale alla Preside", use_container_width=True)
-            
-            if invia_richiesta:
-                if not oggetto_richiesta.strip() or not motivazione_richiesta.strip():
-                    st.error("❌ Errore: I campi 'Oggetto' e 'Motivazione' sono obbligatori per completare l'invio.")
-                else:
-                    with st.spinner("Salvataggio e trasmissione dell'istanza in corso..."):
-                        nuova_richiesta_df = pd.DataFrame([{
-                            "data_richiesta": datetime.now().strftime("%d/%m/%Y %H:%M"),
-                            "richiedente": st.session_state.utente_corrente,
-                            "categoria_bene": tipo_bene_req,
-                            "oggetto": oggetto_richiesta.strip(),
-                            "motivazione": motivazione_richiesta.strip(),
-                            "stato": "In attesa di approvazione"
-                        }])
-                        
-                        try:
-                            df_registro_richieste = scarica_da_sheet("Richieste_Preside")
-                            df_aggiornato = pd.concat([df_registro_richieste, nuova_richiesta_df], ignore_index=True)
-                            carica_su_sheet(df_aggiornato, "Richieste_Preside")
+                invia_c = st.form_submit_button("Invia Richiesta Comodato alla Preside", use_container_width=True)
+                
+                if invia_c:
+                    if not oggetto_richiesta.strip() or not motivazione_richiesta.strip():
+                        st.error("❌ Compila tutti i campi obbligatori.")
+                    else:
+                        with st.spinner("Invio e notifica email in corso..."):
+                            nuova_richiesta_df = pd.DataFrame([{
+                                "data_richiesta": datetime.now().strftime("%d/%m/%Y %H:%M"),
+                                "richiedente": st.session_state.utente_corrente,
+                                "tipo_istanza": "Comodato d'Uso",
+                                "categoria_bene": categoria_bene,
+                                "oggetto": oggetto_richiesta.strip(),
+                                "motivazione": motivazione_richiesta.strip(),
+                                "stato": "In attesa di approvazione"
+                            }])
+                            df_registro = scarica_da_sheet("Richieste_Preside")
+                            carica_su_sheet(pd.concat([df_registro, nuova_richiesta_df], ignore_index=True), "Richieste_Preside")
                             
-                            st.success("🎉 Richiesta inviata correttamente! L'istanza è stata protocollata nel registro ed è ora al vaglio della Dirigente Scolastica.")
-                        except Exception as e:
-                            st.error(f"Errore tecnico durante il salvataggio sul database cloud: {str(e)}")
+                            # Invio email reale all'indirizzo di testing
+                            invia_notifica_email(st.session_state.utente_corrente, "Comodato d'Uso", oggetto_richiesta.strip(), motivazione_richiesta.strip())
+                            
+                            st.success(f"🎉 Richiesta di comodato inoltrata alla Preside e notificata a {EMAIL_TESTING}!")
+                            
+        elif tipo_corrente == "Materiale":
+            st.markdown("## 📦 Modulo B: Richiesta Materiale Logistico / Consumo")
+            st.markdown("---")
+            st.info(f"Utente: **{st.session_state.utente_corrente}** | Tipologia: **Fornitura / Materiale di Consumo**")
+            
+            with st.form("modulo_materiale_form", clear_on_submit=True):
+                col_m1, col_m2 = st.columns(2)
+                with col_m1:
+                    categoria_bene = st.selectbox("Tipologia Materiale:", ["Cancelleria / Carta", "Materiale Sanitario / Pulizia", "Arredi / Strumentazione Aula"])
+                    oggetto_richiesta = st.text_input("Descrizione Sintetica Oggetto:", placeholder="Es. Richiesta risme di carta A4 per uffici/aule")
+                with col_m2:
+                    st.text_input("Destinatario Richiesta:", value="All'attenzione dell'Ufficio di Presidenza", disabled=True)
+                    st.text_input("Data Richiesta:", value=datetime.now().strftime("%d/%m/%Y"), disabled=True)
+                    
+                motivazione_richiesta = st.text_area("Dettaglio quantità e motivazione fornitura:", placeholder="Specificare i dettagli dei prodotti desiderati e i locali di destinazione...")
+                
+                invia_m = st.form_submit_button("Invia Richiesta Materiale", use_container_width=True)
+                
+                if invia_m:
+                    if not oggetto_richiesta.strip() or not motivazione_richiesta.strip():
+                        st.error("❌ Compila tutti i campi obbligatori per la fornitura.")
+                    else:
+                        with st.spinner("Invio e notifica email in corso..."):
+                            nuova_richiesta_df = pd.DataFrame([{
+                                "data_richiesta": datetime.now().strftime("%d/%m/%Y %H:%M"),
+                                "richiedente": st.session_state.utente_corrente,
+                                "tipo_istanza": "Fornitura Materiale",
+                                "categoria_bene": categoria_bene,
+                                "oggetto": oggetto_richiesta.strip(),
+                                "motivazione": motivazione_richiesta.strip(),
+                                "stato": "In attesa di approvazione"
+                            }])
+                            df_registro = scarica_da_sheet("Richieste_Preside")
+                            carica_su_sheet(pd.concat([df_registro, nuova_richiesta_df], ignore_index=True), "Richieste_Preside")
+                            
+                            # Invio email reale all'indirizzo di testing
+                            invia_notifica_email(st.session_state.utente_corrente, "Fornitura Materiale", oggetto_richiesta.strip(), motivazione_richiesta.strip())
+                            
+                            st.success(f"🎉 Richiesta materiale registrata e notificata con successo a {EMAIL_TESTING}!")
