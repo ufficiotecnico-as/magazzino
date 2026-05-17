@@ -5,6 +5,13 @@ import io
 import base64
 from PIL import Image
 
+# Componente esterno per la firma su tablet/PC
+try:
+    from streamlit_drawable_canvas import st_canvas
+    CANVAS_AVAILABLE = True
+except ImportError:
+    CANVAS_AVAILABLE = False
+
 # Librerie di archiviazione Google
 try:
     import gspread
@@ -27,7 +34,7 @@ try:
 except ImportError:
     FPDF_AVAILABLE = False
 
-# Configurazione iniziale di pagina (Standard aggiornato)
+# Configurazione iniziale di pagina
 st.set_page_config(page_title="Gestione Magazzini Scarpa", page_icon="🏢", layout="wide")
 
 PASSWORD_MAP = {
@@ -167,11 +174,12 @@ def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione, 
     if immagine_firma is not None:
         try:
             img_buffer = io.BytesIO()
+            # Converte l'array numpy/PIL in RGB prima di passarlo a FPDF
             immagine_firma.convert("RGB").save(img_buffer, format="JPEG")
             img_buffer.seek(0)
             pdf.image(img_buffer, x=115, y=y_posizione_firme + 8, w=65, h=20)
         except Exception:
-            pdf.cell(95, 8, "[Firma Digitale Acquisita]", align="L", ln=True)
+            pdf.cell(95, 8, "[Firma Acquisita nel Sistema]", align="L", ln=True)
     else:
         pdf.cell(95, 8, "_______________________", align="L", ln=True)
             
@@ -287,42 +295,49 @@ else:
                     col_n1, col_n2 = st.columns(2)
                     with col_n1:
                         tipo_sog = st.selectbox("Profilo Richiedente:", ["Alunno", "Genitore / Tutore", "Insegnante / Personale"])
-                        nom_sog = st.text_input("Nome e Cognome dell'Assegnatario:", key="input_nome_assegnatario")
+                        nom_sog = st.text_input("Nome e Cognome dell'Assegnatario:")
                     with col_n2:
                         disp = df_inv_comodati[df_inv_comodati["stato"] == "Disponibile"]["id_bene"].tolist()
                         bene_sel = st.selectbox("Seleziona l'oggetto da consegnare:", disp)
                         
                     st.markdown("<div style='background-color:#fff3cd; padding:12px; border-radius:8px; border:1px solid #ffeeba; font-size:13px;'><b>Clausola di Custodia:</b> Il firmatario prende in carico l'oggetto integro e si impegna a custodirlo responsabilmente.</div>", unsafe_allow_html=True)
                     
-                    st.markdown("#### 🖊️ Apponi la firma nel riquadro sottostante:")
+                    st.markdown("#### 🖊️ Firma sul Tablet qui sotto:")
                     
-                    # Uso di st.canvas (Modulo nativo integrato, sicuro e compatibile con PC/Tablet/Mobile)
-                    canvas_risultato = st.canvas(
-                        stroke_width=3,
-                        stroke_color="#000000",
-                        background_color="#ffffff",
-                        height=150,
-                        width=500,
-                        drawing_mode="freedraw",
-                        key="canvas_firma_nativo"
-                    )
+                    if not CANVAS_AVAILABLE:
+                        st.error("Per sbloccare il modulo firma, scrivi 'streamlit-drawable-canvas' nel file requirements.txt del tuo server.")
+                    else:
+                        # Rendering del canvas esterno ufficiale (Sincronizzato nativamente con Streamlit)
+                        canvas_risultato = st_canvas(
+                            fill_color="rgba(255, 255, 255, 0)",
+                            stroke_width=3,
+                            stroke_color="#000000",
+                            background_color="#ffffff",
+                            height=150,
+                            width=500,
+                            drawing_mode="freedraw",
+                            key="pad_firma_ufficiale"
+                        )
 
-                    if st.button("✍️ Approva e Salva PDF su Google Drive", type="primary", width="stretch"):
-                        nome_pulito = nom_sog.strip()
-                        
-                        if nome_pulito:
-                            # Verifica se l'utente ha effettivamente disegnato sul canvas
-                            if canvas_risultato is not None and canvas_risultato.image_data is not None:
-                                # Converte la firma del canvas in un'immagine PIL utilizzabile
+                        if st.button("✍️ Approva, Genera Verbale e Salva PDF su Google Drive", type="primary", width="stretch"):
+                            nome_pulito = nom_sog.strip()
+                            
+                            if not nome_pulito:
+                                st.error("Inserisci il nome completo dell'assegnatario prima di procedere.")
+                            elif canvas_risultato is not None and canvas_risultato.image_data is not None:
+                                # Estraiamo la matrice di pixel (Numpy Array) della firma
                                 img_array = canvas_risultato.image_data
-                                # Controlla se ci sono pixel neri (tratto della firma) per evitare invii vuoti
+                                
+                                # Controlliamo se l'utente ha disegnato (se ci sono variazioni nei canali di colore)
+                                # Un canvas vuoto ha solo pixel bianchi/trasparenti uniformi
                                 if pd.Series(img_array.flatten()).nunique() <= 1:
-                                    st.error("⚠️ Errore di Acquisizione: Il riquadro di firma è vuoto. Firma prima di salvare.")
+                                    st.error("⚠️ Attenzione: È necessario apporre la firma nel riquadro sopra prima di poter procedere.")
                                 else:
                                     with st.spinner("Generazione ed upload del documento in corso..."):
                                         id_com = int(df_reg_comodati["id_comodato"].astype(float).max()) + 1 if not df_reg_comodati.empty else 1001
                                         data_ora = datetime.now().strftime("%d/%m/%Y %H:%M")
                                         
+                                        # Trasformiamo la matrice in immagine PIL gestibile dal creatore di PDF
                                         immagine_firma = Image.fromarray(img_array.astype('uint8'), 'RGBA')
                                         
                                         pdf_output_bytes = genera_pdf_comodato(id_com, nome_pulito, tipo_sog, bene_sel, data_ora, "CONSEGNA", immagine_firma, st.session_state.utente_corrente)
@@ -341,9 +356,7 @@ else:
                                         else:
                                             st.error("Impossibile caricare su Drive. Verifica le credenziali cloud.")
                             else:
-                                st.error("⚠️ Modulo firma non inizializzato correttamente.")
-                        else:
-                            st.error("Inserisci il nome completo dell'assegnatario prima di procedere.")
+                                st.error("⚠️ Errore di inizializzazione del modulo grafico.")
                             
             with sub_registro:
                 st.markdown("### Registro Contratti Attivi")
