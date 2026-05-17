@@ -79,11 +79,22 @@ st.markdown("""
 # --- FUNZIONE AUTOMATICA INVIO EMAIL DIRETTO DA SMTP SECRETS ---
 def invia_mail_approvazione_diretta(id_ist, richiedente, ruolo, bene, motivazione, token_sicurezza):
     try:
-        smtp_server = st.secrets["smtp"]["server"]
-        smtp_port = int(st.secrets["smtp"]["port"])
-        smtp_user = st.secrets["smtp"]["user"]
-        smtp_password = st.secrets["smtp"]["password"]
+        # Controllo di sicurezza sulle chiavi dei secrets per prevenire KeyError improvvisi
+        if "smtp" not in st.secrets:
+            st.error("Sezione [smtp] mancante nei secrets di Streamlit.")
+            return False
+            
+        smtp_conf = st.secrets["smtp"]
+        smtp_server = smtp_conf.get("server")
+        smtp_port = smtp_conf.get("port")
+        smtp_user = smtp_conf.get("user")
+        smtp_password = smtp_conf.get("password")
         
+        if not all([smtp_server, smtp_port, smtp_user, smtp_password]):
+            st.error("Uno o più parametri SMTP (server, port, user, password) sono vuoti nei secrets.")
+            return False
+            
+        smtp_port = int(smtp_port)
         destinatario = "marcobrunetti14@gmail.com"
         
         msg = MIMEMultipart("alternative")
@@ -476,7 +487,7 @@ else:
                             if invio_ok:
                                 st.success(f"Istanza {id_ist} salvata! Email di notifica inviata istantaneamente al Dirigente.")
                             else:
-                                st.warning("Istanza salvata nel database, ma si è verificato un errore nell'invio della mail di notifica. Controlla la configurazione dei Secret SMTP.")
+                                st.warning("Istanza salvata nel database, ma si è verificato un problema di comunicazione con il server mail. Verifica la configurazione della sezione [smtp] nei Secrets.")
                     else:
                         st.error("Tutti i campi del modulo sono obbligatori.")
                         
