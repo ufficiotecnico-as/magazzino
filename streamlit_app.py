@@ -9,7 +9,7 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
-# --- CONFIGURAZIONE PAGINA (Unica, tassativamente all'inizio) ---
+# --- CONFIGURAZIONE PAGINA (Tassativamente all'inizio) ---
 st.set_page_config(page_title="Gestione Magazzini Scarpa", page_icon="🏢", layout="wide")
 
 # --- IMPORTAZIONE SICURA DEL MODULO INDEPENDENTE ---
@@ -17,7 +17,7 @@ try:
     import gestione_preventivi
     from gestione_preventivi import mostra_interfaccia_preventivi
     MODULO_PREVENTIVI_DISPONIBILE = True
-except Exception:
+except Exception as e:
     MODULO_PREVENTIVI_DISPONIBILE = False
 
 # --- CONFIGURAZIONI SISTEMA ---
@@ -303,7 +303,6 @@ def genera_pdf_ordine_fornitore(dati_ordine):
     pdf.set_font("Times", "", 11); pdf.cell(28, 6, "DETERMINA: ", ln=False); pdf.set_font("Times", "B", 11); pdf.cell(152, 6, pulisci_caratteri_fpdf(dati_ordine.get("determina")), ln=True)
     pdf.ln(6)
     
-    pdf.set_font("Times", "", 11); pdf.cell(180, 5, pulisci_caratteri_fpdf("Cordiali saluti."), ln=True); pdf.ln(4)
     pdf.set_font("Times", "I", 9.5)
     testo_legge = ("Per ottemperare agli obblighi previsti dalla legge Vi ricordiamo che sarà necessario rilasciare la "
                    "\"DICHIARAZIONE RELATIVA AL POSSESSO DEI REQUISITI PER L'AFFIDAMENTO DEI CONTRATTI PUBBLICI "
@@ -411,7 +410,7 @@ if st.session_state.ruolo_utente is None:
                     if nome.strip() and email_ut.strip():
                         st.session_state.ruolo_utente = "collaboratore"
                         st.session_state.utente_corrente = nome.strip()
-                        st.session_state.ruolo_specifico = rupture
+                        st.session_state.ruolo_specifico = ruolo
                         st.session_state.email_utente = email_ut.strip()
                         st.rerun()
                     else: st.error("Compila tutti i campi.")
@@ -577,7 +576,7 @@ else:
             if MODULO_PREVENTIVI_DISPONIBILE:
                 mostra_interfaccia_preventivi(scarica_da_sheet, carica_su_sheet, invia_email_sistema, URL_INTERMEDIARIO_SILENZIOSO, df_istanze, genera_pdf_ordine_fornitore, carica_su_drive_unico, ID_CARTELLA_ORDINI)
             else:
-                st.info("ℹ️ Il modulo preventivi è configurato, ma il file `gestione_preventivi.py` non è ancora stato creato.")
+                st.error("⚠️ Il file `gestione_preventivi.py` contiene errori bloccanti oppure non è stato caricato nella stessa cartella.")
 
     # ==========================================
     # WORKFLOW INTERNO: OPERATORI MAGAZZINI STANDARD
@@ -602,4 +601,5 @@ else:
                         nuovo = pd.DataFrame([{"id_richiesta_mag": id_rm, "data_creazione": datetime.now().strftime("%d/%m/%Y %H:%M"), "magazzino_origine": st.session_state.magazzino_selezionato, "materiale_richiesto": mat, "quantita_esimata": qta, "stato_iter": "In attesa di preventivi", "note": note}])
                         carica_su_sheet(pd.concat([df_rm, nuovo], ignore_index=True), "Richieste_Preventivo_Magazzino")
                         st.success(f"Richiesta inoltrata! ID REQ interna: {id_rm}")
-                    else: st.error("Specificare il materiale.")
+                    else:
+                        st.error("Specificare il materiale.")
