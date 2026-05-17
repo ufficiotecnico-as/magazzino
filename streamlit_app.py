@@ -24,6 +24,7 @@ except Exception:
 URL_INTERMEDIARIO_SILENZIOSO = "https://script.google.com/macros/s/AKfycbyXBLjDpJrSGHoUpuspTsNAG9f6lGhF1e8oGyJ8nkY6jZMTJo04zsT_6eLyEybGgv4/exec"
 ID_CARTELLA_CONSEGNE = "1pJpYtIfcMEKFh62rSOGTXWYG8CgvzN4m"
 ID_CARTELLA_RICONSEGNE = "1S6IcauDOc-8sFiCdGv67CHKf_H9u7BVW"
+ID_CARTELLA_ORDINI = "1bVTs2smvVJONs2oIAFZdDvX9pYDK9MZT"  # Cartella d'archiviazione Lettere d'Ordine
 SPREADSHEET_ID = "1Q91H_TULvpsnPcyOwQ1lxmjOf809xp4cUz9p1EdMc-4"
 ID_CARTELLA_DRIVE_PRINCIPALE = "1bVTs2smvVJONs2oIAFZdDvX9pYDK9MZT"
 URL_LOGO = "https://cspace.spaggiari.eu//pub/TVII0004/TVII0004-intestazione-nuova-senzaloghi.png?_t=1712923868"
@@ -65,7 +66,7 @@ except ImportError:
 
 
 # --- GOOGLE CONNECTIONS ---
-@st.cache_resource(ttl=5) # Alzato leggermente il TTL per evitare micro-caricamenti continui
+@st.cache_resource(ttl=5)
 def connetti_google_sheets():
     if not GSPREAD_AVAILABLE: return None
     creds_info = None
@@ -95,7 +96,7 @@ def scarica_da_sheet(nome_scheda):
         elif "Richieste_Preventivo_Magazzino" in nome_scheda:
             df_base = pd.DataFrame(columns=["id_richiesta_mag", "data_creazione", "magazzino_origine", "materiale_richiesto", "quantita_esimata", "stato_iter", "note"])
         elif "Registro_Preventivi" in nome_scheda:
-            df_base = pd.DataFrame(columns=["id_preventivo", "id_richiesta_mag", "fornitore", "importo_ivato", "data_inserimento", "stato_approvazione", "note"])
+            df_base = pd.DataFrame(columns=["id_preventivo", "id_richiesta_mag", "fornitore", "importo_ivato", "data_inserimento", "stato_approvazione", "note", "cig", "determina"])
         elif "Anagrafica_Fornitori" in nome_scheda:
             df_base = pd.DataFrame(columns=["id_fornitore", "ragione_sociale", "partita_iva", "email_contatto"])
         else:
@@ -162,7 +163,7 @@ class PDFMinisteriale(FPDF):
         self.cell(180, 4, pulisci_caratteri_fpdf(footer_text), ln=True, align="C")
 
 def pulisci_caratteri_fpdf(testo):
-    mappa = { "à": "a'", "á": "a'", "è": "e'", "é": "e'", "ì": "i'", "ò": "o'", "ù": "u'" }
+    mappa = { "à": "a'", "á": "a'", "è": "e'", "é": "e'", "ì": "i'", "ò": "o'", "ù": "u'", "€": "EUR" }
     for k, v in mappa.items(): testo = testo.replace(k, v)
     return testo.encode('raw_unicode_escape').decode('utf-8').encode('latin1', 'replace').decode('latin1')
 
@@ -238,6 +239,86 @@ def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione="
         pdf.text(115, y_f + 10, "____________________________")
     return pdf.output()
 
+# --- COSTRUZIONE DELLA LETTERA D'ORDINE BASATA SUL TUO HTML ---
+def genera_pdf_ordine_fornitore(dati_ordine):
+    if not FPDF_AVAILABLE: return b"Errore PDF"
+    pdf = PDFMinisteriale()
+    pdf.add_page()
+    
+    try: 
+        pdf.image(URL_LOGO, x=15, y=10, w=180)
+        pdf.set_y(35)
+    except Exception:
+        pdf.set_font("Times", "B", 13)
+        pdf.cell(180, 6, "ISISS ANTONIO SCARPA", ln=True, align="C")
+        pdf.set_y(35)
+        
+    pdf.set_font("Times", "I", 10)
+    pdf.cell(90, 5, pulisci_caratteri_fpdf("Protocollo (vedi segnatura)"), ln=False)
+    pdf.cell(90, 5, pulisci_caratteri_fpdf("Motta di Livenza, (vedi segnatura)"), ln=True, align="R")
+    pdf.ln(8)
+    
+    pdf.set_font("Times", "B", 11)
+    pdf.cell(110, 5, "", ln=False)
+    pdf.cell(70, 5, pulisci_caratteri_fpdf("Spett.le"), ln=True, align="L")
+    pdf.set_font("Times", "", 11)
+    info_f = dati_ordine.get("fornitore", "Ditta Fornitrice")
+    for linea in info_f.split("\n"):
+        if linea.strip():
+            pdf.cell(110, 5, "", ln=False)
+            pdf.cell(70, 5, pulisci_caratteri_fpdf(linea.strip()), ln=True, align="L")
+    pdf.ln(10)
+    
+    pdf.set_font("Times", "B", 11)
+    pdf.cell(18, 5, "Oggetto: ", ln=False)
+    pdf.multi_cell(162, 5, pulisci_caratteri_fpdf(dati_ordine.get("oggetto_ordine", "")))
+    pdf.ln(8)
+    
+    pdf.set_font("Times", "", 11)
+    testo_rif = (f"In riferimento a Vostro preventivo inviato in data {dati_ordine.get('data_preventivo')} "
+                 f"vostro protocollo {dati_ordine.get('protocollo_fornitore')} "
+                 f"con nostro protocollo {dati_ordine.get('protocollo_istituto')} "
+                 f"e si invia ordine per quanto segue:")
+    pdf.multi_cell(180, 6, pulisci_caratteri_fpdf(testo_rif))
+    pdf.ln(8)
+    
+    # Tabella beni ordinati
+    pdf.set_font("Times", "B", 10)
+    pdf.cell(110, 7, pulisci_caratteri_fpdf("Descrizione"), border=1, ln=False, align="L")
+    pdf.cell(25, 7, pulisci_caratteri_fpdf("Q.tà"), border=1, ln=False, align="C")
+    pdf.cell(45, 7, pulisci_caratteri_fpdf("Importo IVATO"), border=1, ln=True, align="R")
+    
+    pdf.set_font("Times", "", 10)
+    pdf.cell(110, 7, pulisci_caratteri_fpdf(dati_ordine.get("descrizione_materiale")), border=1, ln=False, align="L")
+    pdf.cell(25, 7, pulisci_caratteri_fpdf(str(dati_ordine.get("quantita"))), border=1, ln=False, align="C")
+    pdf.cell(45, 7, pulisci_caratteri_fpdf(f"{dati_ordine.get('importo_ivato')} EUR"), border=1, ln=True, align="R")
+    
+    pdf.set_font("Times", "B", 10)
+    pdf.cell(135, 7, pulisci_caratteri_fpdf("TOTALE IMPONIBILE"), border=1, ln=False, align="R")
+    pdf.cell(45, 7, pulisci_caratteri_fpdf(f"{dati_ordine.get('importo_ivato')} EUR"), border=1, ln=True, align="R")
+    pdf.ln(10)
+    
+    pdf.set_font("Times", "", 11)
+    pdf.cell(180, 6, pulisci_caratteri_fpdf("Pagamento a mezzo mandato vista fattura, NS. Cod. Univoco UFOA6X"), ln=True)
+    pdf.cell(12, 6, "CIG: ", ln=False); pdf.set_font("Times", "B", 11); pdf.cell(168, 6, pulisci_caratteri_fpdf(dati_ordine.get("cig")), ln=True)
+    pdf.set_font("Times", "", 11); pdf.cell(28, 6, "DETERMINA: ", ln=False); pdf.set_font("Times", "B", 11); pdf.cell(152, 6, pulisci_caratteri_fpdf(dati_ordine.get("determina")), ln=True)
+    pdf.ln(6)
+    
+    pdf.set_font("Times", "", 11); pdf.cell(180, 5, pulisci_caratteri_fpdf("Cordiali saluti."), ln=True); pdf.ln(4)
+    pdf.set_font("Times", "I", 9.5)
+    testo_legge = ("Per ottemperare agli obblighi previsti dalla legge Vi ricordiamo che sarà necessario rilasciare la "
+                   "\"DICHIARAZIONE RELATIVA AL POSSESSO DEI REQUISITI PER L'AFFIDAMENTO DEI CONTRATTI PUBBLICI "
+                   "EX ARTT. 94, 95, 96, 97, 98 E 100 DEL CODICE DEI CONTRATTI - D. Lgs 36/2023\" completa di carta d'identità "
+                   "del legale rappresentante entro 7 giorni lavorativi dal ricevimento della presente alla mail tvis01100a@istruzione.it.\n"
+                   "Diversamente l'ordine si ritiene annullato.")
+    pdf.multi_cell(180, 5, pulisci_caratteri_fpdf(testo_legge)); pdf.ln(4)
+    pdf.set_font("Times", "", 11); pdf.cell(180, 5, pulisci_caratteri_fpdf("Cordiali saluti."), ln=True); pdf.ln(12)
+    
+    pdf.set_font("Times", "", 11); pdf.cell(180, 5, pulisci_caratteri_fpdf("La Dirigente Scolastica"), ln=True, align="C")
+    pdf.set_font("Times", "B", 11); pdf.cell(180, 5, pulisci_caratteri_fpdf("Maria Cristina Taddeo"), ln=True, align="C")
+    pdf.set_font("Times", "I", 7.5); pdf.cell(180, 4, pulisci_caratteri_fpdf("Documento informatico firmato digitalmente ai sensi del D.Lgs 82/2005 CAD art.45, ss.mm.ii e norme collegate"), ln=True, align="C")
+    return pdf.output()
+
 def carica_su_drive_unico(file_bytes, nome_file, mime_type, id_cartella_destinazione):
     if not GOOGLE_DRIVE_AVAILABLE: return None
     try:
@@ -297,14 +378,13 @@ if "action" in query_params and "id" in query_params:
             idx = idx_lista[0]
             if df_f.at[idx, "stato"] == "In attesa di approvazione":
                 nuovo_stato = "In lavorazione" if (azione == "approve" and df_f.at[idx, "categoria_bene"] == "PC Notebook") else ("Lavorata" if azione == "approve" else "Rifiutata")
-                df_f.at[idx, "stato"] = nuovo_stato
+                df_f.at[idx, "stato"] = nuevo_stato
                 carica_su_sheet(df_f, "Richieste_Preside")
                 if azione == "approve":
                     invia_notifica_approvata_preside(id_req, df_f.at[idx, "email_utente"], df_f.at[idx, "oggetto"], df_f.at[idx, "categoria_bene"])
                     if df_f.at[idx, "categoria_bene"] != "PC Notebook":
                         invia_notifica_pronto_ritiro(id_req, df_f.at[idx, "email_utente"], df_f.at[idx, "oggetto"])
     
-    # Pulizia totale dei parametri per spezzare il loop ed evitare sfarfallamento
     st.query_params.clear()
     st.success("Decisione registrata con successo!")
     if st.button("Accedi alla Piattaforma"):
@@ -496,9 +576,10 @@ else:
 
         elif sezione_selezionata == "📊 Gestione Preventivi e Fornitori":
             if MODULO_PREVENTIVI_DISPONIBILE:
-                mostra_interfaccia_preventivi(scarica_da_sheet, carica_su_sheet, invia_email_sistema, URL_INTERMEDIARIO_SILENZIOSO, df_istanze)
+                # Iniettiamo anche la funzione di generazione documento d'acquisto nell'interfaccia moduli
+                mostra_interfaccia_preventivi(scarica_da_sheet, carica_su_sheet, invia_email_sistema, URL_INTERMEDIARIO_SILENZIOSO, df_istanze, genera_pdf_ordine_fornitore, carica_su_drive_unico, ID_CARTELLA_ORDINI)
             else:
-                st.info("ℹ️ Il modulo preventivi è configurato, ma il file `gestione_preventivi.py` non è ancora stato creato o caricato nella cartella.")
+                st.info("ℹ️ Il modulo preventivi è configurato, ma il file `gestione_preventivi.py` non è ancora stato creato.")
 
     # ==========================================
     # WORKFLOW INTERNO: OPERATORI MAGAZZINI STANDARD (ATA / OFFICINA)
@@ -512,7 +593,6 @@ else:
             
         with tab2:
             st.markdown("### Segnala rotture di stock o materiale da acquistare")
-            st.markdown("L'istanza finirà nella sezione dell'Ufficio Tecnico per richiedere i preventivi alle ditte.")
             with st.form("form_fabb_standard"):
                 mat = st.text_input("Descrizione materiale richiesto:")
                 qta = st.text_input("Quantità o pacchi stimati:")
@@ -524,5 +604,4 @@ else:
                         nuovo = pd.DataFrame([{"id_richiesta_mag": id_rm, "data_creazione": datetime.now().strftime("%d/%m/%Y %H:%M"), "magazzino_origine": st.session_state.magazzino_selezionato, "materiale_richiesto": mat, "quantita_esimata": qta, "stato_iter": "In attesa di preventivi", "note": note}])
                         carica_su_sheet(pd.concat([df_rm, nuovo], ignore_index=True), "Richieste_Preventivo_Magazzino")
                         st.success(f"Richiesta inoltrata! ID REQ interna: {id_rm}")
-                    else:
-                        st.error("Specificare il materiale.")
+                    else: st.error("Specificare il materiale.")
