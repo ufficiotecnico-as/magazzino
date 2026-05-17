@@ -6,8 +6,8 @@ import base64
 from PIL import Image
 
 # --- CONFIGURAZIONE INTERMEDIARIO SILENZIOSO (GOOGLE APPS SCRIPT) ---
-# Aggiornato con il nuovo link fornito:
-URL_INTERMEDIARIO_SILENZIOSO = "https://script.google.com/macros/s/AKfycbxW220zdCHbciiv4LQCsI1e7lLEnQ1bIswfckQYyKwncfeN9Ho45nNXQO8vyCK6y4og/exec"
+# Aggiornato con il tuo nuovo URL di deploy:
+URL_INTERMEDIARIO_SILENZIOSO = "https://script.google.com/macros/s/AKfycbz3MRRCabac0a6p9HADZuziJEdqVPF-AGzcH-yqcvD4jL99un_U5bnnHkwWqPPDb6GV/exec"
 
 # --- CONTROLLO LIBRERIE ESTERNE ---
 try:
@@ -263,7 +263,7 @@ def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione, 
             f"Antonio Scarpa provvede alla consegna in comodato d'uso del bene sotto specificato al richiedente indicato.\n\n"
             f"Dettaglio del Bene Assegnato:\n"
             f"- Identificativo / Seriale: {bene}\n\n"
-            f"Il sottoscritto prende in carico l'oggetto integro, dichiarando di averne verificato il perfetto stato "
+            f"Il sottoscritto prende in carico l'oggetto integro, dichiarando di avantne verificato il perfetto stato "
             f"di funzionamento. Si impegna altresi a custodirlo responsabilmente, utilizzarlo esclusivamente per le finalita "
             f"istituzionali e connesse alle attivita didattiche, ed a restituirlo integro alla Direzione al termine del periodo "
             f"di utilizzo o su esplicita richiesta dell'Istituto."
