@@ -329,10 +329,9 @@ else:
             
     st.image(URL_LOGO, use_container_width=True)
 
-    # --- ACCESSO INTERFACCIA STAFF MAGAZZINIERI / ADMIN PER TICKET ---
+    # --- ACCESSO AMMINISTRATORE / MAGAZZINIERI PER TICKET ED INVENTARI ---
     if st.session_state.ruolo_utente in ["magazziniere", "admin"]:
         
-        # Se l'utente è l'Admin generale, mostriamo tutti i tab inclusa la Gestione Comodati
         if st.session_state.ruolo_utente == "admin":
             tab_magazzini, tab_comodati = st.tabs(["📊 MAGAZZINI LOGISTICI", "✍️ GESTIONE COMODATI (PC & CHIAVI)"])
             
@@ -431,8 +430,10 @@ else:
                         st.markdown("<div style='background-color:#fff3cd; padding:12px; border-radius:8px; border:1px solid #ffeeba; font-size:13px;'><b>Clausola di Custodia:</b> Il firmatario prende in carico l'oggetto integro e si impegna a custodirlo responsabilmente.</div>", unsafe_allow_html=True)
                         st.markdown("#### 🖊️ Acquisizione Firma Digitale (Consegna):")
                         
-                        # Componente di ricezione Streamlit nativo per la firma
-                        firma_base64_consegna = st.components.v1.html(html_code="""
+                        # Input di interscambio per non perdere la firma
+                        firma_base64_consegna = st.text_input("Data stream firma (Generato da Canvas)", key="input_firma_consegna_real", type="password", help="Firma nel pad tratteggiato sotto.")
+                        
+                        st.components.v1.html(html_code="""
                         <div style="background: #ffffff; border: 2px dashed #cbd5e1; padding: 10px; border-radius: 8px; max-width:470px;">
                             <canvas id="canvas_consegna" width="450" height="150" style="border:1px solid #64748b; background:#ffffff; cursor:crosshair; touch-action: none; border-radius:4px;"></canvas>
                             <div style="margin-top:8px; text-align: right;">
@@ -451,7 +452,14 @@ else:
                             }
                             function inviaAStreamlit() {
                                 var dataUrl = canvas.toDataURL('image/png');
-                                window.parent.postMessage({type: 'streamlit:setComponentValue', value: dataUrl}, '*');
+                                var inputs = window.parent.document.getElementsByTagName('input');
+                                for (var i = 0; i < inputs.length; i++) {
+                                    if (inputs[i].getAttribute('aria-label') && inputs[i].getAttribute('aria-label').includes('Data stream firma')) {
+                                        inputs[i].value = dataUrl;
+                                        inputs[i].dispatchEvent(new Event('input', { bubbles: true }));
+                                        break;
+                                    }
+                                }
                             }
                             canvas.addEventListener('mousedown', function(e) { isDrawing = true; var p = getCoord(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); });
                             canvas.addEventListener('mousemove', function(e) { if(!isDrawing) return; var p = getCoord(e); ctx.lineTo(p.x, p.y); ctx.stroke(); });
@@ -459,22 +467,32 @@ else:
                             canvas.addEventListener('touchstart', function(e) { isDrawing = true; var p = getCoord(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); e.preventDefault(); }, {passive: false});
                             canvas.addEventListener('touchmove', function(e) { if(!isDrawing) return; var p = getCoord(e); ctx.lineTo(p.x, p.y); ctx.stroke(); e.preventDefault(); }, {passive: false});
                             canvas.addEventListener('touchend', function() { isDrawing = false; inviaAStreamlit(); });
-                            function pulisciConsegna() { ctx.clearRect(0, 0, canvas.width, canvas.height); window.parent.postMessage({type: 'streamlit:setComponentValue', value: ''}, '*'); }
+                            function pulisciConsegna() { 
+                                ctx.clearRect(0, 0, canvas.width, canvas.height); 
+                                var inputs = window.parent.document.getElementsByTagName('input');
+                                for (var i = 0; i < inputs.length; i++) {
+                                    if (inputs[i].getAttribute('aria-label') && inputs[i].getAttribute('aria-label').includes('Data stream firma')) {
+                                        inputs[i].value = '';
+                                        inputs[i].dispatchEvent(new Event('input', { bubbles: true }));
+                                        break;
+                                    }
+                                }
+                            }
                         </script>
-                        """, height=210, key="pad_consegna_nuova")
+                        """, height=210)
 
                         if st.button("🚀 Approva, Genera Verbale e Salva PDF su Google Drive", type="primary", use_container_width=True):
                             nome_pulito = nom_sog.strip()
                             if not nome_pulito:
                                 st.error("Errore: Compila il campo 'Nome e Cognome dell'Assegnatario'.")
-                            elif not signature_consegna_data := st.session_state.get("pad_consegna_nuova"):
+                            elif not firma_base64_consegna or len(firma_base64_consegna) < 100:
                                 st.error("⚠️ Attenzione: Firma mancante. Disegna la firma nel riquadro prima di salvare.")
                             else:
                                 with st.spinner("Generazione del documento..."):
                                     id_com = int(df_reg_comodati["id_comodato"].astype(float).max()) + 1 if not df_reg_comodati.empty else 1001
                                     data_ora = datetime.now().strftime("%d/%m/%Y %H:%M")
                                     
-                                    pdf_output_bytes = genera_pdf_comodato(id_com, nome_pulito, tipo_sog, bene_sel, data_ora, "CONSEGNA", signature_consegna_data, st.session_state.utente_corrente)
+                                    pdf_output_bytes = genera_pdf_comodato(id_com, nome_pulito, tipo_sog, bene_sel, data_ora, "CONSEGNA", firma_base64_consegna, st.session_state.utente_corrente)
                                     nome_file_pdf = f"Verbale_Consegna_{id_com}_{nome_pulito.replace(' ', '_')}.pdf"
                                     
                                     if carica_su_drive_unico(pdf_output_bytes, nome_file_pdf, "application/pdf", "Comodati_Consegne"):
@@ -507,6 +525,9 @@ else:
                                     with st.expander("Esegui Riconsegna / Scarico ↩"):
                                         st.markdown("**✍️ Firma per la Riconsegna:**")
                                         
+                                        # Campo unico per raccogliere la firma di riconsegna di questo specifico contratto
+                                        firma_base64_ric = st.text_input(f"Stream Riconsegna {riga['id_comodato']}", key=f"input_ric_{riga['id_comodato']}", type="password", help="Firma nel riquadro sotto")
+                                        
                                         html_pad_ric = f"""
                                         <div style="background: #ffffff; border: 2px dashed #cbd5e1; padding: 10px; border-radius: 8px; max-width:320px;">
                                             <canvas id="canvas_ric_{riga['id_comodato']}" width="300" height="120" style="border:1px solid #64748b; background:#ffffff; cursor:crosshair; touch-action: none; border-radius:4px;"></canvas>
@@ -526,7 +547,14 @@ else:
                                             }}
                                             function inviaAStreamlit() {{
                                                 var dataUrl = canvas.toDataURL('image/png');
-                                                window.parent.postMessage({{type: 'streamlit:setComponentValue', value: dataUrl}}, '*');
+                                                var inputs = window.parent.document.getElementsByTagName('input');
+                                                for (var i = 0; i < inputs.length; i++) {{
+                                                    if (inputs[i].getAttribute('aria-label') && inputs[i].getAttribute('aria-label').includes('Stream Riconsegna {riga['id_comodato']}')) {{
+                                                        inputs[i].value = dataUrl;
+                                                        inputs[i].dispatchEvent(new Event('input', {{ bubbles: true }}));
+                                                        break;
+                                                    }}
+                                                }}
                                             }}
                                             canvas.addEventListener('mousedown', function(e) {{ isDrawing = true; var p = getCoord(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); }});
                                             canvas.addEventListener('mousemove', function(e) {{ if(!isDrawing) return; var p = getCoord(e); ctx.lineTo(p.x, p.y); ctx.stroke(); }});
@@ -534,19 +562,28 @@ else:
                                             canvas.addEventListener('touchstart', function(e) {{ isDrawing = true; var p = getCoord(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); e.preventDefault(); }}, {{passive: false}});
                                             canvas.addEventListener('touchmove', function(e) {{ if(!isDrawing) return; var p = getCoord(e); ctx.lineTo(p.x, p.y); ctx.stroke(); e.preventDefault(); }}, {{passive: false}});
                                             canvas.addEventListener('touchend', function() {{ isDrawing = false; inviaAStreamlit(); }});
-                                            function pulisciRic_{riga['id_comodato']}() {{ ctx.clearRect(0, 0, canvas.width, canvas.height); window.parent.postMessage({{type: 'streamlit:setComponentValue', value: ''}}, '*'); }}
+                                            function pulisciRic_{riga['id_comodato']}() {{ 
+                                                ctx.clearRect(0, 0, canvas.width, canvas.height); 
+                                                var inputs = window.parent.document.getElementsByTagName('input');
+                                                for (var i = 0; i < inputs.length; i++) {{
+                                                    if (inputs[i].getAttribute('aria-label') && inputs[i].getAttribute('aria-label').includes('Stream Riconsegna {riga['id_comodato']}')) {{
+                                                        inputs[i].value = '';
+                                                        inputs[i].dispatchEvent(new Event('input', {{ bubbles: true }}));
+                                                        break;
+                                                    }}
+                                                }}
+                                            }}
                                         </script>
                                         """
-                                        firma_base64_ric = st.components.v1.html(html_pad_ric, height=180, key=f"pad_ric_{riga['id_comodato']}")
+                                        st.components.v1.html(html_pad_ric, height=180)
                                             
                                         if st.button("Conferma Rientro e Archivia ↩", key=f"btn_ric_{riga['id_comodato']}", type="primary", use_container_width=True):
-                                            signature_ric_data = st.session_state.get(f"pad_ric_{riga['id_comodato']}")
-                                            if not signature_ric_data:
+                                            if not firma_base64_ric or len(firma_base64_ric) < 100:
                                                 st.error("⚠️ La firma di riconsegna è obbligatoria per chiudere la pratica.")
                                             else:
                                                 with st.spinner("Salvataggio e chiusura contratto..."):
                                                     data_rientro = datetime.now().strftime("%d/%m/%Y %H:%M")
-                                                    pdf_rientro_bytes = genera_pdf_comodato(riga['id_comodato'], riga['nominativo'], riga['tipo_soggetto'], riga['id_bene'], data_rientro, "RICONSEGNA", signature_ric_data, utente_loggato=st.session_state.utente_corrente)
+                                                    pdf_rientro_bytes = genera_pdf_comodato(riga['id_comodato'], riga['nominativo'], riga['tipo_soggetto'], riga['id_bene'], data_rientro, "RICONSEGNA", firma_base64_ric, utente_loggato=st.session_state.utente_corrente)
                                                     nome_file_ric = f"Ricevuta_Riconsegna_{riga['id_comodato']}_{riga['nominativo'].replace(' ', '_')}.pdf"
                                                     
                                                     if carica_su_drive_unico(pdf_rientro_bytes, nome_file_ric, "application/pdf", "Comodati_Riconsegne"):
@@ -561,7 +598,7 @@ else:
                                                     else:
                                                         st.error("Errore nell'invio del PDF su Google Drive.")
                                                         
-        # Interfaccia Magazziniere Singolo
+        # Interfaccia Magazziniere Singolo Staff
         else:
             mag_sel = st.session_state.magazzino_selezionato
             st.markdown(f"## Console di Gestione Logistica - {mag_sel}")
