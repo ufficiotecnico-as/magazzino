@@ -51,9 +51,14 @@ MAPPA_SCHEDE = {
 }
 
 URL_LOGO = "https://cspace.spaggiari.eu//pub/TVII0004/TVII0004-intestazione-nuova-senzaloghi.png?_t=1712923868"
-ID_CARTELLA_DRIVE_PRINCIPALE = "1bVTs2smvVJONs2oIAFZdDvX9pYDK9MZT"
 SPREADSHEET_ID = "1Q91H_TULvpsnPcyOwQ1lxmjOf809xp4cUz9p1EdMc-4"
 LISTA_MAGAZZINI = ["Personale ATA", "Officina", "Tecnici Informatici"]
+
+# ==========================================
+# 📂 ARCHIVIAZIONE COMODATI - ID CARTELLE GOOGLE DRIVE
+# ==========================================
+ID_CARTELLA_CONSEGNA = "1bVTs2smvVJONs2oIAFZdDvX9pYDK9MZT"   
+ID_CARTELLA_RICONSEGNA = "1bVTs2smvVJONs2oIAFZdDvX9pYDK9MZT" 
 
 EMAIL_PRESIDE_TEST = "marcobrunetti14@gmail.com"
 
@@ -134,9 +139,12 @@ def carica_su_sheet(df, nome_scheda):
 
 # --- MOTORE NOTIFICHE EMAIL ---
 def invia_email_sistema(destinatario, oggetto_mail, html_corpo):
-    if "email_config" not in st.secrets: return False
+    cfg = None
+    if "email_config" in st.secrets: cfg = st.secrets["email_config"]
+    elif "smtp" in st.secrets: cfg = st.secrets["smtp"]
+        
+    if not cfg: return False
     try:
-        cfg = st.secrets["email_config"]
         msg = MIMEMultipart('alternative')
         msg['From'] = cfg.get("smtp_user")
         msg['To'] = destinatario
@@ -169,10 +177,7 @@ def invia_notifica_nuova_richiesta(id_req, utente, ruolo, email_ut, tipo_ist, og
     invia_email_sistema(EMAIL_PRESIDE_TEST, f"📦 NUOVA ISTANZA DA VALUTARE - ID {id_req}", html_pr)
 
 def invia_notifica_approvata_preside(id_req, email_ut, ogg, categoria_bene):
-    if categoria_bene == "PC Notebook":
-        destinazione = "passata ai Tecnici Informatici per la configurazione hardware."
-    else:
-        destinazione = "trasmessa direttamente all'Ufficio Tecnico/Magazzino per il ritiro."
+    destinazione = "passata ai Tecnici Informatici per la configurazione hardware." if categoria_bene == "PC Notebook" else "trasmessa direttamente all'Ufficio Tecnico/Magazzino per il ritiro."
     html = f"<h3>Ottime notizie!</h3><p>La tua richiesta <b>ID {id_req}</b> per '{ogg}' è stata <b>autorizzata dalla Dirigente</b> ed è {destinazione}</p>"
     invia_email_sistema(email_ut, f"Richiesta ID {id_req} Autorizzata dalla Dirigente", html)
 
@@ -196,7 +201,7 @@ def pulisci_caratteri_fpdf(testo):
     return testo.encode('raw_unicode_escape').decode('utf-8').encode('latin1', 'replace').decode('latin1')
 
 # =========================================================================
-# MODIFICA CORRETTA: FUNZIONI PDF FORMALI E PROFESSIONALI (STILE MINISTERIALE)
+# MODIFICA FILE PDF CONSEGNA E RICONSEGNA (FORMALE E PROFESSIONALE)
 # =========================================================================
 
 def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, firma_base64=None, utente_loggato="Ufficio Tecnico"):
@@ -319,7 +324,7 @@ def genera_pdf_riconsegna(id_contratto, nome, ruolo, bene, data, firma_base64=No
         f"• Codice Identificativo / Matrice Seriale: {bene}\n\n"
         f"Il personale preposto ha provveduto ad effettuare la verifica dello stato di conservazione e dell'integrità "
         f"funzionale del bene, non riscontrando vizi o anomalie eccedenti il normale deperimento d'uso. Si dichiara pertanto "
-        f"risolto ogni obbligo di custodia e manutenzione precedentemente posto a carico del firmatario, disponendo lo scarico "
+        f"risolto ogni obbligo di custodia e manutenzione precedentemente posto a carico del firmatario, disposing lo scarico "
         f"immediato del bene dal registro dei comodati attivi dell'Istituzione Scolastica."
     )
     pdf.multi_cell(180, 6, pulisci_caratteri_fpdf(corpo_testo))
@@ -352,14 +357,14 @@ def genera_pdf_riconsegna(id_contratto, nome, ruolo, bene, data, firma_base64=No
 
 # =========================================================================
 
-def carica_su_drive_unico(file_bytes, nome_file, mime_type, nome_cartella_dest):
+def carica_su_drive_unico(file_bytes, nome_file, mime_type, id_cartella_destinazione):
     if not GOOGLE_DRIVE_AVAILABLE: return None
     creds_info = dict(st.secrets["google_creds"]) if "google_creds" in st.secrets else dict(st.secrets["gcp_service_account"])
     try:
         creds_info["private_key"] = creds_info["private_key"].replace("\\n", "\n").strip()
         creds = service_account.Credentials.from_service_account_info(creds_info, scopes=['https://www.googleapis.com/auth/drive'])
         service = googleapiclient.discovery.build('drive', 'v3', credentials=creds)
-        meta = {'name': nome_file, 'parents': [ID_CARTELLA_DRIVE_PRINCIPALE]}
+        meta = {'name': nome_file, 'parents': [id_cartella_destinazione]}
         media = MediaIoBaseUpload(io.BytesIO(file_bytes), mimetype=mime_type, resumable=True)
         service.files().create(body=meta, media_body=media, fields='id', supportsAllDrives=True).execute()
         return True
@@ -378,12 +383,7 @@ if "action" in query_params and "id" in query_params:
         idx_lista = df_f.index[df_f["id_richiesta"] == str(id_req)].tolist()
         if idx_lista:
             idx = idx_lista[0]
-            
-            if azione == "approve":
-                nuovo_stato = "In lavorazione" if df_f.at[idx, "categoria_bene"] == "PC Notebook" else "Lavorata"
-            else:
-                nuovo_stato = "Rifiutata"
-                
+            nuovo_stato = "In lavorazione" if (azione == "approve" and df_f.at[idx, "categoria_bene"] == "PC Notebook") else ("Lavorata" if azione == "approve" else "Rifiutata")
             df_f.at[idx, "stato"] = nuovo_stato
             carica_su_sheet(df_f, "Richieste_Preside")
             
@@ -407,10 +407,7 @@ if st.session_state.ruolo_utente is None:
     with col_c:
         st.markdown("<h2 style='text-align: center;'>Piattaforma Logistica di Istituto</h2>", unsafe_allow_html=True)
         with st.container(border=True):
-            scelta = st.radio("Seleziona profilo d'accesso:", [
-                "📝 Collaboratore / Alunno / Docente (Invia Richiesta)",
-                "🔑 Staff Magazzino / Amministrazione / Tecnici"
-            ])
+            scelta = st.radio("Seleziona profilo d'accesso:", ["📝 Collaboratore / Alunno / Docente (Invia Richiesta)", "🔑 Staff Magazzino / Amministrazione / Tecnici"])
             if "Collaboratore" in scelta:
                 nome = st.text_input("Nome e Cognome del Richiedente:")
                 ruolo = st.selectbox("Seleziona il tuo Ruolo:", ["Alunno", "Docente", "Personale ATA", "Collaboratore Scolastico"])
@@ -419,7 +416,7 @@ if st.session_state.ruolo_utente is None:
                     if nome.strip() and email_ut.strip():
                         st.session_state.ruolo_utente = "collaboratore"
                         st.session_state.utente_corrente = nome.strip()
-                        st.session_state.ruolo_specifico = ruolo
+                        st.session_state.ruolo_specifico = rupture = ruolo
                         st.session_state.email_utente = email_ut.strip()
                         st.rerun()
                     else: st.error("Compila tutti i campi obbligatori.")
@@ -455,7 +452,6 @@ else:
     # ==========================================
     if st.session_state.ruolo_utente == "collaboratore":
         st.markdown(f"### Modulo Richieste Logistiche per: {st.session_state.ruolo_specifico}")
-        
         if st.session_state.ruolo_specifico in ["Alunno", "Docente"]:
             categorie_disponibili = ["PC Notebook", "Chiave d'Accesso"]
             tipo_istanza_default = "Comodato d'Uso Dispositivo"
@@ -467,7 +463,6 @@ else:
             cat_b = st.selectbox("Seleziona Bene richiesto:", categorie_disponibili)
             obj_b = st.text_input("Oggetto della Richiesta:")
             mot_b = st.text_area("Motivazione dettagliata per la Direzione:")
-            
             if st.form_submit_button("Invia Istanza alla Dirigente", use_container_width=True):
                 if obj_b.strip() and mot_b.strip():
                     try:
@@ -479,12 +474,11 @@ else:
                         "id_richiesta": nuovo_id, "data_richiesta": datetime.now().strftime("%d/%m/%Y %H:%M"),
                         "richiedente": st.session_state.utente_corrente, "ruolo_richiedente": st.session_state.ruolo_specifico,
                         "email_utente": st.session_state.email_utente, "tipo_istanza": tipo_istanza_default,
-                        "categoria_bene": cat_b, "oggetto": obj_b.strip(), "motivazione": mot_b.strip(),
-                        "stato": "In attesa di approvazione"
+                        "categoria_bene": cat_b, "oggetto": obj_b.strip(), "motivazione": mot_b.strip(), "stato": "In attesa di approvazione"
                     }])
                     carica_su_sheet(pd.concat([df_istanze, nuova_r], ignore_index=True), "Richieste_Preside")
                     invia_notifica_nuova_richiesta(nuovo_id, st.session_state.utente_corrente, st.session_state.ruolo_specifico, st.session_state.email_utente, tipo_istanza_default, obj_b.strip(), mot_b.strip())
-                    st.success(f"Richiesta ID {nuovo_id} inoltrata! La mail automatica è stata inviata al tuo indirizzo.")
+                    st.success(f"Richiesta ID {nuovo_id} inoltrata! La mail è stata inviata.")
 
     # ==========================================
     # WORKFLOW 2: TECNICI INFORMATICI
@@ -492,7 +486,6 @@ else:
     elif st.session_state.ruolo_utente == "magazziniere" and st.session_state.magazzino_selezionato == "Tecnici Informatici":
         st.markdown("<h2>💻 Dashboard Preparazione Tecnici Informatici</h2>", unsafe_allow_html=True)
         da_lavorare = df_istanze[(df_istanze["stato"] == "In lavorazione") & (df_istanze["categoria_bene"] == "PC Notebook")] if not df_istanze.empty else pd.DataFrame()
-        
         if da_lavorare.empty: st.info("Nessun PC da configurare o preparare al momento.")
         else:
             for _, riga in da_lavorare.iterrows():
@@ -504,21 +497,26 @@ else:
                         df_istanze.at[idx, "stato"] = "Lavorata"
                         carica_su_sheet(df_istanze, "Richieste_Preside")
                         invia_notifica_pronto_ritiro(riga['id_richiesta'], riga['email_utente'], riga['oggetto'])
-                        st.success("Stato aggiornato! Email di pronto ritiro inviata all'utente.")
+                        st.success("Stato aggiornato! Email di pronto ritiro inviata.")
                         st.rerun()
 
     # ==========================================
-    # WORKFLOW 3: ADMIN (CONSEGNA & PDF VERBALE)
+    # WORKFLOW 3: SEZIONE ADMIN (CONSEGNA & RICONSEGNA)
     # ==========================================
     elif st.session_state.ruolo_utente == "admin":
-        st.markdown("## 👑 Ufficio Amministrazione e Consegne Fisiche")
-        tab_pronte, tab_riconsegna, tab_tutti_comodati, tab_registro_completo = st.tabs([
+        st.markdown("## 👑 Pannello di Controllo Globale Amministrazione & Logistica")
+        
+        tab_pronte, tab_riconsegna, tab_carica_bene, tab_tutti_comodati, tab_registro_completo, tab_magazzini_standard, tab_sicurezza = st.tabs([
             "📦 PRATICHE PRONTE PER CONSEGNA", 
-            "🔄 MODULO RICONSEGNA BENI", 
+            "🔄 MODULO RICONSEGNA BENI",
+            "➕ INSERIMENTO NUOVO BENE",
             "📋 INVENTARIO COMODATI", 
-            "📜 REGISTRO STORICO"
+            "📜 REGISTRO STORICO ISTANZE",
+            "🏢 VISTE MAGAZZINI AUSILIARI",
+            "⚠️ RESET SISTEMA"
         ])
        
+        # 1. MODULO CONSEGNA FISICA
         with tab_pronte:
             pronte = df_istanze[df_istanze["stato"] == "Lavorata"] if not df_istanze.empty else pd.DataFrame()
             if pronte.empty: st.info("Nessun materiale o dispositivo in attesa di consegna fisica.")
@@ -530,41 +528,46 @@ else:
                         df_inv_c = scarica_da_sheet("Inventario_Comodati")
                         disp = df_inv_c[df_inv_c["stato"] == "Disponibile"]["id_bene"].tolist() if not df_inv_c.empty else []
                         
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            if riga['categoria_bene'] in ["PC Notebook", "Chiave d'Accesso"]:
-                                bene_assegnato = st.selectbox("Seleziona seriale fisico da assegnare:", disp, key=f"b_{riga['id_richiesta']}")
-                            else:
-                                bene_assegnato = st.text_input("Lotto / Quantità materiale consegnato:", value="1 Conf.", key=f"b_{riga['id_richiesta']}")
-                        with col2:
-                            firma_b64 = st.text_area("Incolla codice Pad Firma Grafica:", key=f"f_{riga['id_richiesta']}")
-                        
-                        if st.button(f"Completa Consegna e Genera Verbale ## {riga['id_richiesta']}", type="primary"):
-                            if firma_b64.strip() and bene_assegnato:
-                                df_reg_c = scarica_da_sheet("Registro_Comodati")
-                                id_comodato_numerico = pd.to_numeric(df_reg_c["id_comodato"], errors='coerce')
-                                id_com = int(id_comodato_numerico.max()) + 1 if not df_reg_c.empty and not id_comodato_numerico.dropna().empty else 1001
-                                
-                                data_ora = datetime.now().strftime("%d/%m/%Y %H:%M")
-                                pdf_bytes = genera_pdf_comodato(id_com, riga['richiedente'], riga['ruolo_richiedente'], bene_assegnato, data_ora, firma_b64, st.session_state.utente_corrente)
-                                
-                                if carica_su_drive_unico(pdf_bytes, f"Verbale_{id_com}_{riga['richiedente']}.pdf", "application/pdf", "Verbali_Logistica"):
-                                    idx = df_istanze.index[df_istanze["id_richiesta"].astype(str) == str(riga['id_richiesta'])].tolist()[0]
-                                    df_istanze.at[idx, "stato"] = "Assegnata"
-                                    carica_su_sheet(df_istanze, "Richieste_Preside")
-                             
-                                    nuovo_c = pd.DataFrame([{"id_comodato": id_com, "tipo_soggetto": riga['ruolo_richiedente'], "nominativo": riga['richiedente'], "id_bene": bene_assegnato, "data_consegna": data_ora, "stato_comodato": "Attivo"}])
-                                    carica_su_sheet(pd.concat([df_reg_c, nuovo_c], ignore_index=True), "Registro_Comodati")
+                        with st.form(key=f"form_consegna_id_{riga['id_richiesta']}"):
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                if riga['categoria_bene'] in ["PC Notebook", "Chiave d'Accesso"]:
+                                    bene_assegnato = st.selectbox("Seleziona seriale fisico da assegnare:", disp, key=f"sel_cons_{riga['id_richiesta']}")
+                                else:
+                                    bene_assegnato = st.text_input("Lotto / Quantità materiale consegnato:", value="1 Conf.", key=f"txt_cons_{riga['id_richiesta']}")
+                            with col2:
+                                firma_b64 = st.text_area("Incolla codice Pad Firma Grafica:", key=f"f_cons_{riga['id_richiesta']}")
+                            
+                            sub_btn = st.form_submit_button("Completa Consegna e Genera Verbale", type="primary")
+                            
+                            if sub_btn:
+                                clean_firma = firma_b64.strip()
+                                if clean_firma and bene_assegnato:
+                                    df_reg_c = scarica_da_sheet("Registro_Comodati")
+                                    id_comodato_numerico = pd.to_numeric(df_reg_c["id_comodato"], errors='coerce')
+                                    id_com = int(id_comodato_numerico.max()) + 1 if not df_reg_c.empty and not id_comodato_numerico.dropna().empty else 1001
                                     
-                                    if riga['categoria_bene'] in ["PC Notebook", "Chiave d'Accesso"]:
-                                        df_inv_c.loc[df_inv_c["id_bene"] == bene_assegnato, "stato"] = "Assegnato"
-                                        carica_su_sheet(df_inv_c, "Inventario_Comodati")
+                                    data_ora = datetime.now().strftime("%d/%m/%Y %H:%M")
+                                    pdf_bytes = genera_pdf_comodato(id_com, riga['richiedente'], riga['ruolo_richiedente'], bene_assegnato, data_ora, clean_firma, st.session_state.utente_corrente)
+                                    
+                                    if carica_su_drive_unico(pdf_bytes, f"Verbale_{id_com}_{riga['richiedente']}.pdf", "application/pdf", ID_CARTELLA_CONSEGNA):
+                                        idx = df_istanze.index[df_istanze["id_richiesta"].astype(str) == str(riga['id_richiesta'])].tolist()[0]
+                                        df_istanze.at[idx, "stato"] = "Assegnata"
+                                        carica_su_sheet(df_istanze, "Richieste_Preside")
+                                 
+                                        nuovo_c = pd.DataFrame([{"id_comodato": id_com, "tipo_soggetto": riga['ruolo_richiedente'], "nominativo": riga['richiedente'], "id_bene": bene_assegnato, "data_consegna": data_ora, "stato_comodato": "Attivo"}])
+                                        carica_su_sheet(pd.concat([df_reg_c, nuovo_c], ignore_index=True), "Registro_Comodati")
                                         
-                                    st.success("Pratica Evasa! Verbale ufficiale registrato e caricato.")
-                                    st.rerun()
-                            else: st.error("Firma o identificativo bene mancante.")
+                                        if riga['categoria_bene'] in ["PC Notebook", "Chiave d'Accesso"]:
+                                            df_inv_c.loc[df_inv_c["id_bene"] == bene_assegnato, "stato"] = "Assegnato"
+                                            carica_su_sheet(df_inv_c, "Inventario_Comodati")
+                                            
+                                        st.success("🎉 Pratica Evasa! Archivio aggiornato con successo.")
+                                        st.rerun()
+                                else:
+                                    st.error("Errore: Verificare i dati inseriti e la firma.")
 
-        # Modulo Riconsegna integrato formalmente nell'interfaccia Admin
+        # 2. MODULO RICONSEGNA E CHIUSURA
         with tab_riconsegna:
             st.markdown("### Gestione Riconsegna e Chiusura Comodato")
             df_reg_c = scarica_da_sheet("Registro_Comodati")
@@ -573,36 +576,85 @@ else:
             if comodati_attivi.empty:
                 st.info("Nessun comodato attivo presente nel sistema.")
             else:
-                for _, com in comodati_attivi.iterrows():
-                    with st.expander(f"🔄 Registro ID: {com['id_comodato']} - {com['nominativo']} (Bene: {com['id_bene']})"):
-                        with st.form(key=f"form_riconsegna_id_{com['id_comodato']}"):
-                            st.markdown(f"**Assegnatario:** {com['nominativo']} ({com['tipo_soggetto']}) — **Data Consegna:** {com['data_consegna']}")
-                            firma_ric_b64 = st.text_area("Incolla codice Pad Firma Grafica per Riconsegna:", key=f"f_ric_{com['id_comodato']}")
+                for _, comodato in comodati_attivi.iterrows():
+                    with st.expander(f"🔄 Registro ID: {comodato['id_comodato']} - {comodato['nominativo']} (Bene: {comodato['id_bene']})"):
+                        with st.form(key=f"form_riconsegna_id_{comodato['id_comodato']}"):
+                            st.markdown(f"**Assegnatario:** {comodato['nominativo']} ({comodato['tipo_soggetto']}) — **Data Consegna:** {comodato['data_consegna']}")
+                            firma_ric_b64 = st.text_area("Incolla codice Pad Firma Grafica per Riconsegna:", key=f"f_ric_{comodato['id_comodato']}")
                             
-                            if st.form_submit_button("Effettua Riconsegna e Genera Ricevuta", type="primary"):
+                            sub_btn_ric = st.form_submit_button("Effettua Riconsegna e Genera Ricevuta", type="primary")
+                            
+                            if sub_btn_ric:
                                 clean_firma_ric = firma_ric_b64.strip()
                                 if clean_firma_ric:
                                     data_ora_ora = datetime.now().strftime("%d/%m/%Y %H:%M")
-                                    pdf_ric_bytes = genera_pdf_riconsegna(com['id_comodato'], com['nominativo'], com['tipo_soggetto'], com['id_bene'], data_ora_ora, clean_firma_ric, st.session_state.utente_corrente)
+                                    pdf_ric_bytes = genera_pdf_riconsegna(comodato['id_comodato'], comodato['nominativo'], comodato['tipo_soggetto'], comodato['id_bene'], data_ora_ora, clean_firma_ric, st.session_state.utente_corrente)
                                     
-                                    if carica_su_drive_unico(pdf_ric_bytes, f"Ricevuta_Riconsegna_{com['id_comodato']}_{com['nominativo']}.pdf", "application/pdf", "Verbali_Logistica"):
-                                        idx_reg = df_reg_c.index[df_reg_c["id_comodato"].astype(str) == str(com['id_comodato'])].tolist()[0]
+                                    if carica_su_drive_unico(pdf_ric_bytes, f"Ricevuta_Riconsegna_{comodato['id_comodato']}_{comodato['nominativo']}.pdf", "application/pdf", ID_CARTELLA_RICONSEGNA):
+                                        idx_reg = df_reg_c.index[df_reg_c["id_comodato"].astype(str) == str(comodato['id_comodato'])].tolist()[0]
                                         df_reg_c.at[idx_reg, "stato_comodato"] = "Chiuso/Riconsegnato"
                                         carica_su_sheet(df_reg_c, "Registro_Comodati")
                                         
-                                        df_inv_c = scarica_da_sheet("Inventario_Comodati")
-                                        if not df_inv_c.empty and com['id_bene'] in df_inv_c["id_bene"].values:
-                                            df_inv_c.loc[df_inv_c["id_bene"] == com['id_bene'], "stato"] = "Disponibile"
-                                            carica_su_sheet(df_inv_c, "Inventario_Comodati")
-                                            
-                                        st.success(f"🔄 Dispositivo {com['id_bene']} ripristinato in inventario. Ricevuta archiviata.")
+                                        df_inv_r = scarica_da_sheet("Inventario_Comodati")
+                                        if not df_inv_r.empty and comodato['id_bene'] in df_inv_r["id_bene"].values.tolist():
+                                            df_inv_r.loc[df_inv_r["id_bene"] == comodato['id_bene'], "stato"] = "Disponibile"
+                                            carica_su_sheet(df_inv_r, "Inventario_Comodati")
+                                        
+                                        st.success(f"Riconsegna completata con successo!")
                                         st.rerun()
-                                else: st.error("Inserire la firma grafica per terminare la procedura.")
+                                else:
+                                    st.error("Inserire la firma digitale per validare il rientro del bene.")
 
+        # 3. INSERIMENTO NUOVO BENE INVENTARIO
+        with tab_carica_bene:
+            st.markdown("### ➕ Registrazione Nuovi Beni Strumentali")
+            with st.form("form_nuovo_bene_inv"):
+                new_id = st.text_input("Identificativo Univoco / Codice Seriale Bene:")
+                new_tipo = st.selectbox("Tipologia Catastale:", ["PC Notebook", "Chiave d'Accesso", "Attrezzatura", "Altro"])
+                new_desc = st.text_input("Descrizione / Marca / Modello dispositivo:")
+                if st.form_submit_button("Inserisci in Inventario Istituzionale"):
+                    if new_id.strip():
+                        df_inv_attuale = scarica_da_sheet("Inventario_Comodati")
+                        if not df_inv_attuale.empty and new_id.strip() in df_inv_attuale["id_bene"].astype(str).values:
+                            st.error("Codice seriale già presente in inventario.")
+                        else:
+                            nuovo_b_row = pd.DataFrame([{"id_bene": new_id.strip(), "tipo_bene": new_tipo, "descrizione": new_desc.strip(), "stato": "Disponibile"}])
+                            carica_su_sheet(pd.concat([df_inv_attuale, nuovo_b_row], ignore_index=True), "Inventario_Comodati")
+                            st.success(f"Bene {new_id.strip()} aggiunto come Disponibile!")
+                            st.rerun()
+                    else: st.error("L'ID del bene non può essere vuoto.")
+
+        # 4. TABELLA INVENTARIO COMODATI
         with tab_tutti_comodati:
+            st.markdown("### 📋 Elenco Beni in Inventario ed Assegnazioni Attive")
             st.dataframe(scarica_da_sheet("Inventario_Comodati"), use_container_width=True, hide_index=True)
+
+        # 5. TABELLA REGISTRO STORICO ISTANZE PRESIDE
         with tab_registro_completo:
+            st.markdown("### 📜 Log Storico Richieste Gestite e Stati Attuali")
             st.dataframe(df_istanze, use_container_width=True, hide_index=True)
+
+        # 6. VISUALIZZAZIONE MAGAZZINI STANDARD
+        with tab_magazzini_standard:
+            st.markdown("### 🏢 Inventari Separati dei Magazzini Secondari")
+            mag_scelto = st.selectbox("Seleziona Magazzino Istituzionale da Visionare:", LISTA_MAGAZZINI)
+            if mag_scelto:
+                st.dataframe(scarica_da_sheet(MAPPA_SCHEDE[mag_scelto]["inventario"]), use_container_width=True, hide_index=True)
+
+        # 7. SEZIONE SICUREZZA / RESET DATABASE
+        with tab_sicurezza:
+            st.markdown("### ⚠️ Manutenzione Straordinaria Database")
+            st.warning("Le seguenti azioni sovrascriveranno i dati correnti su Google Sheets portandoli allo stato iniziale vuoto.")
+            if st.button("🚨 Svuota Registro Istanze Preside"):
+                df_reset = pd.DataFrame(columns=["id_richiesta", "data_richiesta", "richiedente", "ruolo_richiedente", "email_utente", "tipo_istanza", "categoria_bene", "oggetto", "motivazione", "stato"])
+                carica_su_sheet(df_reset, "Richieste_Preside")
+                st.success("Registro richieste svuotato.")
+                st.rerun()
+            if st.button("🚨 Svuota Storico Registro Comodati"):
+                df_reset_com = pd.DataFrame(columns=["id_comodato", "tipo_soggetto", "nominativo", "id_bene", "data_consegna", "stato_comodato"])
+                carica_su_sheet(df_reset_com, "Registro_Comodati")
+                st.success("Registro storico dei contratti azzerato.")
+                st.rerun()
 
     # ==========================================
     # WORKFLOW 4: ALTRI MAGAZZINI (ATA O STANDARD)
