@@ -27,7 +27,7 @@ try:
 except ImportError:
     FPDF_AVAILABLE = False
 
-# Configurazione iniziale di pagina
+# Configurazione iniziale di pagina (Standard aggiornato)
 st.set_page_config(page_title="Gestione Magazzini Scarpa", page_icon="🏢", layout="wide")
 
 PASSWORD_MAP = {
@@ -121,7 +121,7 @@ def carica_su_sheet(df, nome_scheda):
     except Exception: pass
 
 # --- GENERAZIONE PDF CON FIRMA ---
-def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione, firma_base64=None, utente_loggato="Ufficio Tecnico"):
+def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione, immagine_firma=None, utente_loggato="Ufficio Tecnico"):
     if not FPDF_AVAILABLE:
         return b"Errore libreria PDF"
     
@@ -164,16 +164,11 @@ def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione, 
     pdf.set_font("Arial", "I", 10)
     pdf.cell(95, 8, f"F.to {firma_admin_testo}", align="L")
     
-    if firma_base64 and "," in firma_base64:
+    if immagine_firma is not None:
         try:
-            dati_f = firma_base64.split(",")[1]
-            img_data = base64.b64decode(dati_f)
-            img = Image.open(io.BytesIO(img_data))
-            
             img_buffer = io.BytesIO()
-            img.convert("RGB").save(img_buffer, format="JPEG")
+            immagine_firma.convert("RGB").save(img_buffer, format="JPEG")
             img_buffer.seek(0)
-            
             pdf.image(img_buffer, x=115, y=y_posizione_firme + 8, w=65, h=20)
         except Exception:
             pdf.cell(95, 8, "[Firma Digitale Acquisita]", align="L", ln=True)
@@ -211,7 +206,7 @@ def carica_su_drive_unico(file_bytes, nome_file, mime_type, nome_cartella_dest):
     except Exception:
         return None
 
-# Stato sessione
+# Inizializzazione Stato sessione
 if "ruolo_utente" not in st.session_state: st.session_state.ruolo_utente = None
 if "utente_corrente" not in st.session_state: st.session_state.utente_corrente = ""
 if "magazzino_selezionato" not in st.session_state: st.session_state.magazzino_selezionato = None
@@ -278,7 +273,7 @@ else:
                     if st.form_submit_button("Aggiungi all'Inventario", width="stretch"):
                         if id_b.strip() and desc_b.strip():
                             nuovo_b = pd.DataFrame([{"id_bene": id_b.strip(), "tipo_bene": tipo_b, "descrizione": desc_b.strip(), "stato": "Disponibile"}])
-                            df_inv_comodati = pd.concat([df_inv_comodati, nuevo_b], ignore_index=True)
+                            df_inv_comodati = pd.concat([df_inv_comodati, nuovo_b], ignore_index=True)
                             carica_su_sheet(df_inv_comodati, "Inventario_Comodati")
                             st.success("Bene inserito!")
                             st.rerun()
@@ -299,111 +294,54 @@ else:
                         
                     st.markdown("<div style='background-color:#fff3cd; padding:12px; border-radius:8px; border:1px solid #ffeeba; font-size:13px;'><b>Clausola di Custodia:</b> Il firmatario prende in carico l'oggetto integro e si impegna a custodirlo responsabilmente.</div>", unsafe_allow_html=True)
                     
-                    st.markdown("#### 🖊️ Apponi la firma nel riquadro bianco sottostante:")
+                    st.markdown("#### 🖊️ Apponi la firma nel riquadro sottostante:")
                     
-                    # Input di testo invisibile per la sincronizzazione dei dati JavaScript -> Streamlit
-                    dati_firma_raw = st.text_input(
-                        "Dati di validazione firma (Generati automaticamente):", 
-                        key="valore_firma_str", 
-                        label_visibility="collapsed"
+                    # Uso di st.canvas (Modulo nativo integrato, sicuro e compatibile con PC/Tablet/Mobile)
+                    canvas_risultato = st.canvas(
+                        stroke_width=3,
+                        stroke_color="#000000",
+                        background_color="#ffffff",
+                        height=150,
+                        width=500,
+                        drawing_mode="freedraw",
+                        key="canvas_firma_nativo"
                     )
 
-                    # Pannello HTML nativo per catturare la firma via Canvas grafico
-                    html_pad_firma = """
-                    <div style="background: #f8fafc; border: 2px dashed #cbd5e1; padding: 15px; border-radius: 12px; max-width:510px;">
-                        <canvas id="canvas_firma" width="480" height="160" style="border:2px solid #64748b; background:#ffffff; cursor:crosshair; touch-action: none; border-radius:8px;"></canvas>
-                        <br>
-                        <button type="button" onclick="pulisciCanvas()" style="margin-top:10px; padding:10px 20px; background:#ef4444; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold; font-size:14px;">Cancella e Riscrivi</button>
-                    </div>
-
-                    <script>
-                        var canvas = document.getElementById('canvas_firma');
-                        var ctx = canvas.getContext('2d');
-                        ctx.strokeStyle = '#000000';
-                        ctx.lineWidth = 3;
-                        ctx.lineCap = 'round';
-                        var isDrawing = false;
-
-                        function getCoordinate(e) {
-                            var rect = canvas.getBoundingClientRect();
-                            if(e.touches && e.touches.length > 0) {
-                                return { x: e.touches[0].clientX - rect.left, y: e.touches[0].clientY - rect.top };
-                            }
-                            return { x: e.clientX - rect.left, y: e.clientY - rect.top };
-                        }
-
-                        function iniziaDisegno(e) { isDrawing = true; var p = getCoordinate(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); e.preventDefault(); }
-                        function disegna(e) { if(!isDrawing) return; var p = getCoordinate(e); ctx.lineTo(p.x, p.y); ctx.stroke(); e.preventDefault(); }
-                        
-                        function fermaDisegno() { 
-                            if(isDrawing) {
-                                isDrawing = false;
-                                var dataUrl = canvas.toDataURL('image/png');
-                                
-                                var inputs = window.parent.document.querySelectorAll('input[type="text"]');
-                                for (var i = 0; i < inputs.length; i++) {
-                                    if (inputs[i].id && inputs[i].id.includes("valore_firma_str")) {
-                                        inputs[i].value = dataUrl;
-                                        inputs[i].dispatchEvent(new Event('input', { bubbles: true }));
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-
-                        canvas.addEventListener('mousedown', iniziaDisegno);
-                        canvas.addEventListener('mousemove', disegna);
-                        canvas.addEventListener('mouseup', fermaDisegno);
-                        canvas.addEventListener('mouseleave', fermaDisegno);
-
-                        canvas.addEventListener('touchstart', iniziaDisegno, {passive: false});
-                        canvas.addEventListener('touchmove', disegna, {passive: false});
-                        canvas.addEventListener('touchend', fermaDisegno);
-
-                        function pulisciCanvas() { 
-                            ctx.clearRect(0, 0, canvas.width, canvas.height); 
-                            var inputs = window.parent.document.querySelectorAll('input[type="text"]');
-                            for (var i = 0; i < inputs.length; i++) {
-                                if (inputs[i].id && inputs[i].id.includes("valore_firma_str")) {
-                                    inputs[i].value = "";
-                                    inputs[i].dispatchEvent(new Event('input', { bubbles: true }));
-                                    break;
-                                }
-                            }
-                        }
-                    </script>
-                    """
-                    
-                    # Rendering sicuro tramite il modulo nativo per caricare la parte grafica senza restrizioni
-                    st.components.v1.html(html_pad_firma, height=250)
-
                     if st.button("✍️ Approva e Salva PDF su Google Drive", type="primary", width="stretch"):
-                        nome_pulito = st.session_state.input_nome_assegnatario.strip()
-                        firma_acquisita = st.session_state.valore_firma_str.strip()
+                        nome_pulito = nom_sog.strip()
                         
                         if nome_pulito:
-                            if not firma_acquisita or len(firma_acquisita) < 500:
-                                st.error("⚠️ Errore di Acquisizione: Non hai firmato nel riquadro bianco o la firma è incompleta. Riprova.")
+                            # Verifica se l'utente ha effettivamente disegnato sul canvas
+                            if canvas_risultato is not None and canvas_risultato.image_data is not None:
+                                # Converte la firma del canvas in un'immagine PIL utilizzabile
+                                img_array = canvas_risultato.image_data
+                                # Controlla se ci sono pixel neri (tratto della firma) per evitare invii vuoti
+                                if pd.Series(img_array.flatten()).nunique() <= 1:
+                                    st.error("⚠️ Errore di Acquisizione: Il riquadro di firma è vuoto. Firma prima di salvare.")
+                                else:
+                                    with st.spinner("Generazione ed upload del documento in corso..."):
+                                        id_com = int(df_reg_comodati["id_comodato"].astype(float).max()) + 1 if not df_reg_comodati.empty else 1001
+                                        data_ora = datetime.now().strftime("%d/%m/%Y %H:%M")
+                                        
+                                        immagine_firma = Image.fromarray(img_array.astype('uint8'), 'RGBA')
+                                        
+                                        pdf_output_bytes = genera_pdf_comodato(id_com, nome_pulito, tipo_sog, bene_sel, data_ora, "CONSEGNA", immagine_firma, st.session_state.utente_corrente)
+                                        nome_file_pdf = f"Verbale_Consegna_{id_com}_{nome_pulito.replace(' ', '_')}.pdf"
+                                        
+                                        if carica_su_drive_unico(pdf_output_bytes, nome_file_pdf, "application/pdf", "Comodati_Consegne"):
+                                            nuova_r = pd.DataFrame([{"id_comodato": id_com, "tipo_soggetto": tipo_sog, "nominativo": nome_pulito, "id_bene": bene_sel, "data_consegna": data_ora, "stato_comodato": "In Corso"}])
+                                            df_reg_comodati = pd.concat([df_reg_comodati, nuova_r], ignore_index=True)
+                                            carica_su_sheet(df_reg_comodati, "Registro_Comodati")
+                                            
+                                            df_inv_comodati.loc[df_inv_comodati["id_bene"] == bene_sel, "stato"] = "Assegnato"
+                                            carica_su_sheet(df_inv_comodati, "Inventario_Comodati")
+                                            
+                                            st.success(f"🚀 Verbale PDF N°{id_com} salvato con successo!")
+                                            st.rerun()
+                                        else:
+                                            st.error("Impossibile caricare su Drive. Verifica le credenziali cloud.")
                             else:
-                                with st.spinner("Generazione ed upload del documento in corso..."):
-                                    id_com = int(df_reg_comodati["id_comodato"].astype(float).max()) + 1 if not df_reg_comodati.empty else 1001
-                                    data_ora = datetime.now().strftime("%d/%m/%Y %H:%M")
-                                    
-                                    pdf_output_bytes = genera_pdf_comodato(id_com, nome_pulito, tipo_sog, bene_sel, data_ora, "CONSEGNA", firma_acquisita, st.session_state.utente_corrente)
-                                    nome_file_pdf = f"Verbale_Consegna_{id_com}_{nome_pulito.replace(' ', '_')}.pdf"
-                                    
-                                    if carica_su_drive_unico(pdf_output_bytes, nome_file_pdf, "application/pdf", "Comodati_Consegne"):
-                                        nuova_r = pd.DataFrame([{"id_comodato": id_com, "tipo_soggetto": tipo_sog, "nominativo": nome_pulito, "id_bene": bene_sel, "data_consegna": data_ora, "stato_comodato": "In Corso"}])
-                                        df_reg_comodati = pd.concat([df_reg_comodati, nuova_r], ignore_index=True)
-                                        carica_su_sheet(df_reg_comodati, "Registro_Comodati")
-                                        
-                                        df_inv_comodati.loc[df_inv_comodati["id_bene"] == bene_sel, "stato"] = "Assegnato"
-                                        carica_su_sheet(df_inv_comodati, "Inventario_Comodati")
-                                        
-                                        st.success(f"🚀 Verbale PDF N°{id_com} salvato con successo!")
-                                        st.rerun()
-                                    else:
-                                        st.error("Impossibile caricare su Drive. Verifica le credenziali cloud.")
+                                st.error("⚠️ Modulo firma non inizializzato correttamente.")
                         else:
                             st.error("Inserisci il nome completo dell'assegnatario prima di procedere.")
                             
