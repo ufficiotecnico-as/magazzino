@@ -637,10 +637,151 @@ else:
             with tab_registro_completo:
                 st.dataframe(df_istanze, use_container_width=True, hide_index=True)
 
-    # ==========================================
-    # WORKFLOW 4: ALTRI MAGAZZINI (ATA O STANDARD)
-    # ==========================================
-    elif st.session_state.ruolo_utente == "magazziniere":
-        st.markdown(f"## 📦 Magazzino Standard: {st.session_state.magazzino_selezionato}")
-        st.dataframe(scarica_da_sheet(MAPPA_SCHEDE[st.session_state.magazzino_selezionato]["inventario"]), use_container_width=True, hide_index=True)
+  # ==========================================
+# WORKFLOW 4: MAGAZZINO STANDARD / ATA
+# ==========================================
+# Questa sezione si attiva quando l'utente loggato è un magazziniere (es. Personale ATA)
+if st.session_state.ruolo_utente == "magazziniere" and st.session_state.magazzino_selezionato == "Personale ATA":
+    
+    st.markdown(f"## 📦 Magazzino Standard: {st.session_state.magazzino_selezionato}")
+    
+    # 1. Recupero dei nomi delle schede specifiche dal dizionario MAPPA_SCHEDE
+    scheda_inventario = MAPPA_SCHEDE[st.session_state.magazzino_selezionato]["inventario"]
+    scheda_richieste = MAPPA_SCHEDE[st.session_state.magazzino_selezionato]["richieste"]
+    
+    # 2. Creazione dei Tab per dividere la gestione dell'Inventario e delle Richieste
+    tab_inventario, tab_richieste = st.tabs(["📋 INVENTARIO MATERIALE", "📥 GESTIONE RICHIESTE"])
+    
+    # --- TAB INVENTARIO ---
+    with tab_inventario:
+        st.subheader("Stato dell'Inventario Corrente")
+        # Scarica i dati aggiornati dal foglio Google "Inventario ata"
+        df_inventario = scarica_da_sheet(scheda_inventario)
+        
+        if df_inventario.empty:
+            st.warning("Nessun dato trovato nell'inventario.")
+        else:
+            # Mostra la tabella dell'inventario
+            st.dataframe(df_inventario, use_container_width=True, hide_index=True)
+            
+            # Form per aggiornare le quantità o i prodotti nell'inventario
+            st.markdown("### 🔄 Aggiorna Inventario")
+            with st.form("form_aggiorna_inventario"):
+                # Assumendo che le colonne dello sheet siano "elemento" e "valore" o simili
+                elemento_sel = st.selectbox("Seleziona l'elemento da modificare:", df_inventario["elemento"].tolist() if "elemento" in df_inventario.columns else [])
+                nuovo_valore = st.number_input("Nuova Quantità / Valore:", min_value=0, step=1)
+                
+                if st.form_submit_button("Salva Modifiche Inventario"):
+                    if "elemento" in df_inventario.columns:
+                        # Aggiorna il valore nel DataFrame locale
+                        df_inventario.loc[df_inventario["elemento"] == elemento_sel, "valore"] = nuovo_valore
+                        # Carica il DataFrame aggiornato su Google Sheets
+                        carica_su_sheet(df_inventario, scheda_inventario)
+                        st.success(f"Inventario aggiornato per: {elemento_sel}")
+                        st.rerun()
+
+    # --- TAB RICHIESTE ---
+    with tab_richieste:
+        st.subheader("Richieste pervenute al magazzino ATA")
+        # Scarica i dati aggiornati dal foglio Google "Richieste ata"
+        df_richieste_ata = scarica_da_sheet(scheda_richieste)
+        
+        if df_richieste_ata.empty:
+            st.info("Nessuna richiesta presente per questo magazzino.")
+        else:
+            # Mostra la tabella delle richieste operative per gli ATA
+            st.dataframe(df_richieste_ata, use_container_width=True, hide_index=True)
+            
+            # Logica di gestione/approvazione delle singole richieste
+            st.markdown("### ⚙️ Azioni Rapide su Richieste")
+            id_richieste_disponibili = df_richieste_ata["id_richiesta"].astype(str).tolist() if "id_richiesta" in df_richieste_ata.columns else []
+            
+            if id_richieste_disponibili:
+                col_id, col_azione = st.columns(2)
+                with col_id:
+                    id_sel = st.selectbox("Seleziona ID Richiesta:", id_richieste_disponibili)
+                with col_azione:
+                    azione_stato = st.selectbox("Imposta Stato:", ["Approvata", "Rifiutata", "Consegnata"])
+                
+                if st.button("Aggiorna Stato Richiesta", type="primary"):
+                    idx = df_richieste_ata.index[df_richieste_ata["id_richiesta"].astype(str) == str(id_sel)].tolist()[0]
+                    df_richieste_ata.at[idx, "stato"] = azione_stato
+                    
+                    # Salva le modifiche su Google Sheets
+                    carica_su_sheet(df_richieste_ata, scheda_richieste)
+                    st.success(f"Richiesta {id_sel} aggiornata in: {azione_stato}")
+                    st.rerun()# ==========================================
+# WORKFLOW 4: MAGAZZINO STANDARD / ATA
+# ==========================================
+# Questa sezione si attiva quando l'utente loggato è un magazziniere (es. Personale ATA)
+if st.session_state.ruolo_utente == "magazziniere" and st.session_state.magazzino_selezionato == "Personale ATA":
+    
+    st.markdown(f"## 📦 Magazzino Standard: {st.session_state.magazzino_selezionato}")
+    
+    # 1. Recupero dei nomi delle schede specifiche dal dizionario MAPPA_SCHEDE
+    scheda_inventario = MAPPA_SCHEDE[st.session_state.magazzino_selezionato]["inventario"]
+    scheda_richieste = MAPPA_SCHEDE[st.session_state.magazzino_selezionato]["richieste"]
+    
+    # 2. Creazione dei Tab per dividere la gestione dell'Inventario e delle Richieste
+    tab_inventario, tab_richieste = st.tabs(["📋 INVENTARIO MATERIALE", "📥 GESTIONE RICHIESTE"])
+    
+    # --- TAB INVENTARIO ---
+    with tab_inventario:
+        st.subheader("Stato dell'Inventario Corrente")
+        # Scarica i dati aggiornati dal foglio Google "Inventario ata"
+        df_inventario = scarica_da_sheet(scheda_inventario)
+        
+        if df_inventario.empty:
+            st.warning("Nessun dato trovato nell'inventario.")
+        else:
+            # Mostra la tabella dell'inventario
+            st.dataframe(df_inventario, use_container_width=True, hide_index=True)
+            
+            # Form per aggiornare le quantità o i prodotti nell'inventario
+            st.markdown("### 🔄 Aggiorna Inventario")
+            with st.form("form_aggiorna_inventario"):
+                # Assumendo che le colonne dello sheet siano "elemento" e "valore" o simili
+                elemento_sel = st.selectbox("Seleziona l'elemento da modificare:", df_inventario["elemento"].tolist() if "elemento" in df_inventario.columns else [])
+                nuovo_valore = st.number_input("Nuova Quantità / Valore:", min_value=0, step=1)
+                
+                if st.form_submit_button("Salva Modifiche Inventario"):
+                    if "elemento" in df_inventario.columns:
+                        # Aggiorna il valore nel DataFrame locale
+                        df_inventario.loc[df_inventario["elemento"] == elemento_sel, "valore"] = nuovo_valore
+                        # Carica il DataFrame aggiornato su Google Sheets
+                        carica_su_sheet(df_inventario, scheda_inventario)
+                        st.success(f"Inventario aggiornato per: {elemento_sel}")
+                        st.rerun()
+
+    # --- TAB RICHIESTE ---
+    with tab_richieste:
+        st.subheader("Richieste pervenute al magazzino ATA")
+        # Scarica i dati aggiornati dal foglio Google "Richieste ata"
+        df_richieste_ata = scarica_da_sheet(scheda_richieste)
+        
+        if df_richieste_ata.empty:
+            st.info("Nessuna richiesta presente per questo magazzino.")
+        else:
+            # Mostra la tabella delle richieste operative per gli ATA
+            st.dataframe(df_richieste_ata, use_container_width=True, hide_index=True)
+            
+            # Logica di gestione/approvazione delle singole richieste
+            st.markdown("### ⚙️ Azioni Rapide su Richieste")
+            id_richieste_disponibili = df_richieste_ata["id_richiesta"].astype(str).tolist() if "id_richiesta" in df_richieste_ata.columns else []
+            
+            if id_richieste_disponibili:
+                col_id, col_azione = st.columns(2)
+                with col_id:
+                    id_sel = st.selectbox("Seleziona ID Richiesta:", id_richieste_disponibili)
+                with col_azione:
+                    azione_stato = st.selectbox("Imposta Stato:", ["Approvata", "Rifiutata", "Consegnata"])
+                
+                if st.button("Aggiorna Stato Richiesta", type="primary"):
+                    idx = df_richieste_ata.index[df_richieste_ata["id_richiesta"].astype(str) == str(id_sel)].tolist()[0]
+                    df_richieste_ata.at[idx, "stato"] = azione_stato
+                    
+                    # Salva le modifiche su Google Sheets
+                    carica_su_sheet(df_richieste_ata, scheda_richieste)
+                    st.success(f"Richiesta {id_sel} aggiornata in: {azione_stato}")
+                    st.rerun()
 
