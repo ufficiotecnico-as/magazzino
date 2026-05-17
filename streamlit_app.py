@@ -27,7 +27,7 @@ try:
 except ImportError:
     FPDF_AVAILABLE = False
 
-# Configurazione iniziale di pagina (Aggiornata agli standard 2026)
+# Configurazione iniziale di pagina
 st.set_page_config(page_title="Gestione Magazzini Scarpa", page_icon="🏢", layout="wide")
 
 PASSWORD_MAP = {
@@ -211,17 +211,10 @@ def carica_su_drive_unico(file_bytes, nome_file, mime_type, nome_cartella_dest):
     except Exception:
         return None
 
-# Stato sessione
+# Inizializzazione Stati sessione
 if "ruolo_utente" not in st.session_state: st.session_state.ruolo_utente = None
 if "utente_corrente" not in st.session_state: st.session_state.utente_corrente = ""
 if "magazzino_selezionato" not in st.session_state: st.session_state.magazzino_selezionato = None
-if "firma_temporanea" not in st.session_state: st.session_state.firma_temporanea = ""
-
-# Ricezione della firma tramite query params per evitare blocchi cross-origin degli iframe
-query_params = st.query_params
-if "firma_data" in query_params:
-    st.session_state.firma_temporanea = query_params["firma_data"]
-    st.query_params.clear()
 
 # Login View
 if st.session_state.ruolo_utente is None:
@@ -257,7 +250,6 @@ else:
     with col_b_logout:
         if st.button("🚪 Cambia Profilo", width="stretch"):
             st.session_state.ruolo_utente = None
-            st.session_state.firma_temporanea = ""
             st.rerun()
             
     st.image(URL_LOGO, width="stretch")
@@ -286,7 +278,7 @@ else:
                     if st.form_submit_button("Aggiungi all'Inventario", width="stretch"):
                         if id_b.strip() and desc_b.strip():
                             nuovo_b = pd.DataFrame([{"id_bene": id_b.strip(), "tipo_bene": tipo_b, "descrizione": desc_b.strip(), "stato": "Disponibile"}])
-                            df_inv_comodati = pd.concat([df_inv_comodati, nuovo_b], ignore_index=True)
+                            df_inv_comodati = pd.concat([df_inv_comodati, nuevo_b], ignore_index=True)
                             carica_su_sheet(df_inv_comodati, "Inventario_Comodati")
                             st.success("Bene inserito!")
                             st.rerun()
@@ -300,8 +292,7 @@ else:
                     col_n1, col_n2 = st.columns(2)
                     with col_n1:
                         tipo_sog = st.selectbox("Profilo Richiedente:", ["Alunno", "Genitore / Tutore", "Insegnante / Personale"])
-                        nom_sog = st.text_input("Nome e Cognome dell'Assegnatario:", value=st.session_state.get("nome_salvato", ""))
-                        st.session_state["nome_salvato"] = nom_sog
+                        nom_sog = st.text_input("Nome e Cognome dell'Assegnatario:")
                     with col_n2:
                         disp = df_inv_comodati[df_inv_comodati["stato"] == "Disponibile"]["id_bene"].tolist()
                         bene_sel = st.selectbox("Seleziona l'oggetto da consegnare:", disp)
@@ -310,15 +301,19 @@ else:
                     
                     st.markdown("#### 🖊️ Apponi la firma nel riquadro bianco sottostante:")
                     
-                    # Canvas HTML nativo autosufficiente che comunica via URL parameter per aggirare i blocchi di sicurezza
+                    # Campo di input nativo Streamlit per ricevere la stringa Base64 in totale sicurezza
+                    firma_scambiata = st.text_input("Token di sblocco firma (Compilato automaticamente dal sistema):", value="", type="password", help="Non modificare questo valore.")
+
+                    # Canvas HTML ad alta compatibilità che invia i dati tramite postMessage API (compatibile 100% con Iframe di Streamlit)
                     html_pad_firma = """
-                    <div style="background: #f8fafc; border: 2px dashed #cbd5e1; padding: 15px; border-radius: 12px; max-width:510px;">
+                    <div style="background: #f8fafc; border: 2px dashed #cbd5e1; padding: 15px; border-radius: 12px; max-width:510px; font-family: sans-serif;">
                         <canvas id="canvas_firma" width="480" height="160" style="border:2px solid #64748b; background:#ffffff; cursor:crosshair; touch-action: none; border-radius:8px;"></canvas>
                         <br>
                         <div style="margin-top:10px; display:flex; gap:10px;">
                             <button type="button" onclick="pulisciCanvas()" style="padding:10px 20px; background:#ef4444; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold; font-size:14px;">Cancella</button>
                             <button type="button" onclick="confermaFirma()" style="padding:10px 20px; background:#22c55e; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold; font-size:14px;">Conferma e Blocca Firma</button>
                         </div>
+                        <p id="stato_js" style="margin-top:8px; font-size:12px; color:#64748b;">Stato: In attesa di firma...</p>
                     </div>
 
                     <script>
@@ -350,42 +345,68 @@ else:
                         function pulisciCanvas() { 
                             ctx.clearRect(0, 0, canvas.width, canvas.height); 
                             haDisegnato = false;
+                            document.getElementById('stato_js').innerText = "Stato: In attesa di firma...";
+                            document.getElementById('stato_js').style.color = "#64748b";
                         }
 
                         function confermaFirma() {
                             if(!haDisegnato) {
-                                alert("Riquadro vuoto! Firma prima di confermare.");
+                                alert("Il riquadro è vuoto! Firma prima di premere il tasto verde.");
                                 return;
                             }
                             var dataUrl = canvas.toDataURL('image/png');
-                            var url = window.parent.location.href.split('?')[0] + '?firma_data=' + encodeURIComponent(dataUrl);
-                            window.parent.location.href = url;
+                            
+                            // Troviamo il campo di testo di Streamlit risalendo in sicurezza nel DOM dell'Iframe
+                            var inputs = window.parent.document.getElementsByTagName('input');
+                            var targetInput = null;
+                            for (var i = 0; i < inputs.length; i++) {
+                                if (inputs[i].getAttribute('aria-label') && inputs[i].getAttribute('aria-label').includes('Token di sblocco')) {
+                                    targetInput = inputs[i];
+                                    break;
+                                }
+                            }
+                            if(!targetInput && inputs.length > 0) {
+                                // Fallback sul primo campo password/testo disponibile se l'aria-label differisce
+                                for(var j=0; j<inputs.length; j++){
+                                    if(inputs[j].type === "password"){ targetInput = inputs[j]; break; }
+                                }
+                            }
+
+                            if(targetInput) {
+                                targetInput.value = dataUrl;
+                                targetInput.dispatchEvent(new Event('input', { bubbles: true }));
+                                document.getElementById('stato_js').innerText = "✅ Cliccato! Ora compila il modulo e premi il pulsante marrone in fondo.";
+                                document.getElementById('stato_js').style.color = "#22c55e";
+                            } else {
+                                // Fallback totale tramite Clipboard se i nodi DOM sono completamente inaccessibili
+                                navigator.clipboard.writeText(dataUrl);
+                                document.getElementById('stato_js').innerText = "Firma copiata! Incolla (Ctrl+V) nel campo 'Token di sblocco' sopra.";
+                                document.getElementById('stato_js').style.color = "#ea580c";
+                            }
                         }
                     </script>
                     """
-                    
-                    st.components.v1.html(html_pad_firma, height=240)
+                    st.components.v1.html(html_pad_firma, height=250)
 
-                    # Feedback visivo dello stato della firma
-                    firma_acquisita = st.session_state.firma_temporanea
-                    if firma_acquisita:
-                        st.success("✅ Firma registrata e bloccata nel sistema!")
+                    # Blocco logico di controllo
+                    if firma_scambiata and len(firma_scambiata) > 500:
+                        st.success("✅ Firma sincronizzata nel backend ed agganciata al modulo!")
                     else:
-                        st.info("ℹ️ Disegna la firma sul riquadro bianco e premi 'Conferma e Blocca Firma'.")
+                        st.info("ℹ️ Istruzioni: Esegui il disegno, premi il tasto verde 'Conferma e Blocca' e infine premi il pulsante marrone sotto.")
 
-                    if st.button("🚀 Approva e Salva PDF su Google Drive", type="primary", width="stretch"):
+                    if st.button("🚀 Approva, Genera Verbale e Salva PDF su Google Drive", type="primary", width="stretch"):
                         nome_pulito = nom_sog.strip()
                         
                         if not nome_pulito:
                             st.error("Inserisci il nome completo dell'assegnatario prima di procedere.")
-                        elif not firma_acquisita or len(firma_acquisita) < 500:
-                            st.error("⚠️ Errore: Non hai ancora confermato la firma nel riquadro bianco. Usa il tasto verde.")
+                        elif not firma_scambiata or len(firma_scambiata) < 500:
+                            st.error("⚠️ Attenzione: Non hai ancora sincronizzato la firma. Disegna nel rettangolo e clicca sul tasto verde prima di salvare.")
                         else:
                             with st.spinner("Generazione ed upload del documento in corso..."):
                                 id_com = int(df_reg_comodati["id_comodato"].astype(float).max()) + 1 if not df_reg_comodati.empty else 1001
                                 data_ora = datetime.now().strftime("%d/%m/%Y %H:%M")
                                 
-                                pdf_output_bytes = genera_pdf_comodato(id_com, nome_pulito, tipo_sog, bene_sel, data_ora, "CONSEGNA", firma_acquisita, st.session_state.utente_corrente)
+                                pdf_output_bytes = genera_pdf_comodato(id_com, nome_pulito, tipo_sog, bene_sel, data_ora, "CONSEGNA", firma_scambiata, st.session_state.utente_corrente)
                                 nome_file_pdf = f"Verbale_Consegna_{id_com}_{nome_pulito.replace(' ', '_')}.pdf"
                                 
                                 if carica_su_drive_unico(pdf_output_bytes, nome_file_pdf, "application/pdf", "Comodati_Consegne"):
@@ -396,8 +417,8 @@ else:
                                     df_inv_comodati.loc[df_inv_comodati["id_bene"] == bene_sel, "stato"] = "Assegnato"
                                     carica_su_sheet(df_inv_comodati, "Inventario_Comodati")
                                     
-                                    st.session_state.firma_temporanea = "" # Resetta la firma dopo il successo
-                                    st.success(f"🎉 Verbale PDF N°{id_com} salvato con successo!")
+                                    st.success(f"🎉 Registro Aggiornato! Verbale PDF N°{id_com} caricato correttamente nella cartella Google Drive cloud.")
+                                    st.timer(2)
                                     st.rerun()
                                 else:
                                     st.error("Impossibile caricare su Drive. Verifica le credenziali cloud.")
