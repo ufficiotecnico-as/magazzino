@@ -120,39 +120,37 @@ def carica_su_sheet(df, nome_scheda):
         worksheet.update(valori)
     except Exception: pass
 
-# --- GENERAZIONE PDF BASATO SU MODELLO MINISTERIALE ---
+# --- GENERAZIONE PDF BASATO SU MODELLO MINISTERIALE (RISOLTO UNICODE EXCEPTION) ---
 def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione, firma_base64=None, utente_loggato="Ufficio Tecnico"):
     if not FPDF_AVAILABLE:
         return b"Errore libreria PDF"
     
-    # Inizializzazione PDF A4 standard (Margin: 15mm)
     pdf = FPDF(orientation='P', unit='mm', format='A4')
     pdf.set_margins(15, 15, 15)
     pdf.add_page()
-    pdf.set_auto_page_break(auto=True, margin=35) # Spazio per il footer ministeriale
+    pdf.set_auto_page_break(auto=True, margin=35)
     
-    # 1. Intestazione Istituzionale (Immagine Intestazione Nuova)
+    # 1. Intestazione Istituzionale
     try:
         pdf.image(URL_LOGO, x=15, y=12, w=180)
         pdf.ln(22)
     except Exception:
         pdf.set_font("Times", "B", 14)
-        pdf.cell(180, 6, "ISTITUTO D'ISTRUZIONE SUPERIORE STATALE ANTONIO SCARPA", ln=True, align="C")
+        pdf.cell(180, 6, "ISISS ANTONIO SCARPA", ln=True, align="C")
         pdf.ln(10)
         
     # 2. Segnatura / Protocollo e Data locale
     pdf.set_font("Times", "", 11)
     data_corrente = data.split(" ")[0] if " " in data else data
     
-    pos_y_protocollo = pdf.get_y()
     pdf.cell(90, 6, "Protocollo n. (vedi segnatura)", ln=False, align="L")
     pdf.cell(90, 6, f"Motta di Livenza, {data_corrente}", ln=True, align="R")
     pdf.ln(4)
     
-    # 3. Destinatario (Allineamento a Destra come da modello)
+    # 3. Destinatario
     pdf.set_font("Times", "B", 11)
     pdf.cell(90, 6, "", ln=False)
-    pdf.cell(90, 6, f"Ai Docenti / Al Personale Interessato", ln=True, align="L")
+    pdf.cell(90, 6, "Ai Docenti / Al Personale Interessato", ln=True, align="L")
     pdf.cell(90, 6, "", ln=False)
     pdf.cell(90, 6, f"Sig./Sigg. {nome} ({ruolo})", ln=True, align="L")
     pdf.ln(8)
@@ -162,7 +160,6 @@ def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione, 
     pdf.cell(25, 6, "OGGETTO: ", ln=False)
     pdf.set_font("Times", "", 11)
     
-    testo_oggetto = ""
     if tipo_operazione == "CONSEGNA":
         testo_oggetto = f"Verbale di Consegna e Assegnazione in Comodato d'Uso Gratuito dei Beni d'Istituto - Registro ID {id_contratto}."
     else:
@@ -170,54 +167,50 @@ def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione, 
     pdf.multi_cell(155, 6, testo_oggetto)
     pdf.ln(6)
     
-    # 5. Corpo del Testo (Stile Times New Roman, Giustificato)
+    # 5. Corpo del Testo (Sostituiti i caratteri speciali non-ASCII per evitare l'errore FPDFUnicode)
     pdf.set_font("Times", "", 11)
     
     if tipo_operazione == "CONSEGNA":
         corpo_testo = (
             f"Con la presente si attesta che in data odierna l'Amministrazione dell'Istituto Superiore "
-            f"'Antonio Scarpa' provvede alla consegna in comodato d'uso del bene sotto specificato al richiedente indicato.\n\n"
+            f"Antonio Scarpa provvede alla consegna in comodato d'uso del bene sotto specificato al richiedente indicato.\n\n"
             f"Dettaglio del Bene Assegnato:\n"
-            f"• Identificativo / Seriale: {bene}\n\n"
+            f"- Identificativo / Seriale: {bene}\n\n"
             f"Il sottoscritto prende in carico l'oggetto integro, dichiarando di averne verificato il perfetto stato "
-            f"di funzionamento. Si impegna altresì a custodirlo responsabilmente, utilizzarlo esclusivamente per le finalità "
-            f"istituzionali e connesse alle attività didattiche, ed a restituirlo integro alla Direzione al termine del periodo "
+            f"di funzionamento. Si impegna altresi a custodirlo responsabilmente, utilizzarlo esclusivamente per le finalita "
+            f"istituzionali e connesse alle attivita didattiche, ed a restituirlo integro alla Direzione al termine del periodo "
             f"di utilizzo o su esplicita richiesta dell'Istituto."
         )
     else:
         corpo_testo = (
-            f"Con la presente si attesta che il bene sotto descritto è stato formalmente riconsegnato all'Istituto "
+            f"Con la presente si attesta che il bene sotto descritto e stato formalmente riconsegnato all'Istituto "
             f"in data odierna, ponendo fine agli obblighi di custodia previsti dal contratto.\n\n"
             f"Dettaglio del Bene Riconsegnato:\n"
-            f"• Identificativo / Seriale: {bene}\n\n"
-            f"L'Ufficio Tecnico/Magazzino ha verificato l'integrità e lo stato del dispositivo, completandone "
+            f"- Identificativo / Seriale: {bene}\n\n"
+            f"L'Ufficio Tecnico/Magazzino ha verificato l'integrita e lo stato del dispositivo, completandone "
             f"l'operazione di scarico logistico dal registro dei comodati attivi."
         )
         
     pdf.multi_cell(180, 6, corpo_testo, align="J")
-    pdf.ln(12)
+    pdf.ln(15)
     
-    # 6. Blocco Firme Allineato e non sovrapposto
+    # 6. Blocco Firme Allineato (Risolta la sovrapposizione)
     pdf.set_font("Times", "B", 11)
     y_posizione_firme = pdf.get_y()
     
-    # Etichette di tracciamento
-    pdf.cell(90, 6, "Per l'Amministrazione:", align="L")
-    pdf.cell(90, 6, "Firma del Richiedente per Accettazione:", align="L", ln=True)
+    pdf.cell(100, 6, "Per l'Amministrazione:", align="L")
+    pdf.cell(80, 6, "Firma del Richiedente:", align="L", ln=True)
     
-    # Nominativi Sotto i Titoli
-    pdf.set_font("Times", "I", 11)
-    firma_admin_testo = "Ufficio Tecnico" if str(utente_loggato).lower() in ["admin", "amministratore"] else str(utente_loggato)
-    pdf.cell(90, 6, f"RESP. {firma_admin_testo.upper()}", align="L")
+    pdf.set_font("Times", "I", 10)
+    pdf.cell(100, 6, "RESP. Ufficio Tecnico", align="L")
     
-    # Gestione Inserimento Immagine Firma senza sovrapposizioni
+    # Inserimento controllato della firma grafica sulla destra
     if firma_base64 and len(firma_base64) > 100:
         try:
             dati_f = firma_base64.split(",")[1] if "," in firma_base64 else firma_base64
             img_data = base64.b64decode(dati_f)
             img_originale = Image.open(io.BytesIO(img_data))
             
-            # Canvas bianco anti-quadrato nero
             sfondo_bianco = Image.new("RGBA", img_originale.size, "WHITE")
             sfondo_bianco.paste(img_originale, (0, 0), img_originale)
             
@@ -225,26 +218,23 @@ def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione, 
             sfondo_bianco.convert("RGB").save(img_buffer, format="JPEG", quality=95)
             img_buffer.seek(0)
             
-            # Disegnata a destra (x=115), leggermente distanziata sotto il testo dell'etichetta (y_firme + 8)
-            pdf.image(img_buffer, x=115, y=y_posizione_firme + 8, w=55, h=16)
+            # Posizionata stabilmente a destra (x=115) e leggermente distanziata in basso (y + 7)
+            pdf.image(img_buffer, x=115, y=y_posizione_firme + 7, w=50, h=14)
         except Exception:
-            pdf.cell(90, 6, "[Firma Digitale Acquisita Log]", align="L", ln=True)
+            pdf.cell(80, 6, "[Firma Digitale Acquisita]", align="L", ln=True)
     else:
-        pdf.cell(90, 6, "____________________________", align="L", ln=True)
+        pdf.cell(80, 6, "____________________________", align="L", ln=True)
         
-    # 7. FOOTER MINISTERIALE OBBLIGATORIO (Simulazione Tabella HTML a fondo pagina)
-    # Impostiamo la posizione fissa a fondo pagina (262mm) per evitare fluttuazioni
+    # 7. FOOTER MINISTERIALE LOGISTICO FISSO
     pdf.set_y(260)
-    pdf.set_draw_color(160, 160, 160)
+    pdf.set_draw_color(180, 180, 180)
     pdf.set_line_width(0.1)
-    pdf.line(15, 260, 195, 260) # Riga divisoria superiore del footer
+    pdf.line(15, 260, 195, 260)
     
-    # Testo Legale della Scuola (allineamento orizzontale)
     pdf.set_font("Arial", "", 7)
     pdf.cell(180, 4, "ISISS \"A. SCARPA\"      Via Primo Maggio, 3 31045 Motta di Livenza (Tv)      C.F. 94071460268      Codice univoco UFOA6X", ln=True, align="C")
-    pdf.cell(180, 3, "E-mail: tvis01100a@istruzione.it      Pec: tvis01100a@pec.istruzione.it      Sito Web: www.isiss-scarpa.edu.it", ln=True, align="C")
+    pdf.cell(180, 3, "tvis01100a@istruzione.it      tvis01100a@pec.istruzione.it", ln=True, align="C")
     
-    # Nota di certificazione e sicurezza informatica a fondo pagina
     pdf.set_font("Arial", "I", 5)
     pdf.cell(180, 4, "Documento informatico firmato digitalmente ai sensi del D.Lgs 82/2005 CAD art.45, ss.mm.ii e norme collegate.", ln=True, align="C")
 
@@ -294,20 +284,20 @@ if "magazzino_selezionato" not in st.session_state: st.session_state.magazzino_s
 if st.session_state.ruolo_utente is None:
     col_l, col_c, col_r = st.columns([1, 1.8, 1])
     with col_c:
-        st.image(URL_LOGO, width="stretch")
+        st.image(URL_LOGO, use_container_width=True)
         st.markdown("<h2 style='text-align: center;'>Piattaforma Logistica di Istituto</h2>", unsafe_allow_html=True)
         with st.container(border=True):
             scelta = st.radio("Seleziona profilo:", ["Collaboratore (Richiesta Materiale)", "Staff Magazzino / Amministrazione"])
             if scelta == "Collaboratore (Richiesta Materiale)":
                 nome = st.text_input("Nome e Cognome:")
-                if st.button("Accedi", type="primary", width="stretch"):
+                if st.button("Accedi", type="primary", use_container_width=True):
                     if nome.strip():
                         st.session_state.ruolo_utente = "collaboratore"
                         st.session_state.utente_corrente = nome.strip()
                         st.rerun()
             else:
                 pwd = st.text_input("Codice autorizzazione:", type="password")
-                if st.button("Autentica ed Entra", type="primary", width="stretch"):
+                if st.button("Autentica ed Entra", type="primary", use_container_width=True):
                     if pwd in PASSWORD_MAP:
                         st.session_state.ruolo_utente = "magazziniere"
                         st.session_state.magazzino_selezionato = PASSWORD_MAP[pwd]
@@ -322,11 +312,11 @@ else:
     col_t, col_b_logout = st.columns([4, 1])
     with col_t: st.markdown(f"Accesso: **{st.session_state.utente_corrente.upper()}**")
     with col_b_logout:
-        if st.button("🚪 Cambia Profilo", width="stretch"):
+        if st.button("🚪 Cambia Profilo", use_container_width=True):
             st.session_state.ruolo_utente = None
             st.rerun()
             
-    st.image(URL_LOGO, width="stretch")
+    st.image(URL_LOGO, use_container_width=True)
 
     # --- MAIN ADMIN INTERFACE ---
     if st.session_state.ruolo_utente == "admin":
@@ -334,7 +324,7 @@ else:
         
         with tab_magazzini:
             mag_sel = st.selectbox("Seleziona Magazzino:", LISTA_MAGAZZINI)
-            st.dataframe(scarica_da_sheet(MAPPA_SCHEDE[mag_sel]["inventario"]), width="stretch", hide_index=True)
+            st.dataframe(scarica_da_sheet(MAPPA_SCHEDE[mag_sel]["inventario"]), use_container_width=True, hide_index=True)
             
         with tab_comodati:
             df_inv_comodati = scarica_da_sheet("Inventario_Comodati")
@@ -349,14 +339,14 @@ else:
                         id_b = st.text_input("ID Seriale (es. PC-012)")
                         tipo_b = st.selectbox("Categoria:", ["PC Notebook", "Chiave d'Accesso"])
                     with col2: desc_b = st.text_input("Descrizione")
-                    if st.form_submit_button("Aggiungi all'Inventario", width="stretch"):
+                    if st.form_submit_button("Aggiungi all'Inventario", use_container_width=True):
                         if id_b.strip() and desc_b.strip():
                             nuovo_b = pd.DataFrame([{"id_bene": id_b.strip(), "tipo_bene": tipo_b, "descrizione": desc_b.strip(), "stato": "Disponibile"}])
                             df_inv_comodati = pd.concat([df_inv_comodati, nuovo_b], ignore_index=True)
                             carica_su_sheet(df_inv_comodati, "Inventario_Comodati")
                             st.success("Bene inserito!")
                             st.rerun()
-                st.dataframe(df_inv_comodati, width="stretch", hide_index=True)
+                st.dataframe(df_inv_comodati, use_container_width=True, hide_index=True)
                 
             with sub_nuovo:
                 st.markdown("### Nuovo Accordo di Comodato")
@@ -373,9 +363,8 @@ else:
                         
                     st.markdown("<div style='background-color:#fff3cd; padding:12px; border-radius:8px; border:1px solid #ffeeba; font-size:13px;'><b>Clausola di Custodia:</b> Il firmatario prende in carico l'oggetto integro e si impegna a custodirlo responsabilmente.</div>", unsafe_allow_html=True)
                     
-                    st.markdown("#### 🖊️ Acquisizione Firma Digitale:");
-
-                    metodo_firma = st.radio("Scegli come apporre la firma:", ["✍️ Disegna Firma Digitale (Usa campo sotto)", "🖼️ Carica immagine della firma (Opzionale)"])
+                    st.markdown("#### 🖊️ Acquisizione Firma Digitale:")
+                    metodo_firma = st.radio("Scegli come apporre la firma:", ["✍️ Disegna Firma Digitale (Usa campo sotto)", "🖼️ Carica immagine della firma"])
                     
                     firma_base64_finale = ""
 
@@ -436,27 +425,24 @@ else:
                         """
                         st.components.v1.html(html_pad_firma, height=270)
                         
-                        stringa_incollata = st.text_area("Incolla qui il Codice Firma generato sopra (Inizia con 'data:image/png;base64...'):", value="")
+                        stringa_incollata = st.text_area("Incolla qui il Codice Firma generato sopra:", value="")
                         if stringa_incollata.startswith("data:image/png;base64,"):
                             firma_base64_finale = stringa_incollata
                             st.success("✅ Codice firma verificato e pronto!")
-
                     else:
                         file_firma = st.file_uploader("Carica un'immagine della firma (PNG/JPG):", type=["png", "jpg", "jpeg"])
                         if file_firma is not None:
                             firma_base64_finale = "data:image/png;base64," + base64.b64encode(file_firma.read()).decode("utf-8")
                             st.success("✅ Immagine firma caricata!")
 
-                    # Pulsante di esecuzione finale e salvataggio cloud
-                    if st.button("🚀 Approva, Genera Verbale e Salva PDF su Google Drive", type="primary", width="stretch"):
+                    if st.button("🚀 Approva, Genera Verbale e Salva PDF su Google Drive", type="primary", use_container_width=True):
                         nome_pulito = nom_sog.strip()
-                        
                         if not nome_pulito:
-                            st.error("Errore: Compila il campo 'Nome e Cognome dell'Assegnatario' prima di procedere.")
+                            st.error("Errore: Compila il campo 'Nome e Cognome dell'Assegnatario'.")
                         elif not firma_base64_finale:
-                            st.error("⚠️ Attenzione: Firma mancante. Genera il codice dal riquadro e incollalo, oppure carica un file immagine.")
+                            st.error("⚠️ Attenzione: Firma mancante. Genera il codice o carica un file.")
                         else:
-                            with st.spinner("Generazione del documento ed upload su Google Drive cloud in corso..."):
+                            with st.spinner("Generazione del documento..."):
                                 id_com = int(df_reg_comodati["id_comodato"].astype(float).max()) + 1 if not df_reg_comodati.empty else 1001
                                 data_ora = datetime.now().strftime("%d/%m/%Y %H:%M")
                                 
@@ -471,10 +457,10 @@ else:
                                     df_inv_comodati.loc[df_inv_comodati["id_bene"] == bene_sel, "stato"] = "Assegnato"
                                     carica_su_sheet(df_inv_comodati, "Inventario_Comodati")
                                     
-                                    st.success(f"🎉 Successo! Contratto N°{id_com} registrato e PDF archiviato su Drive.")
+                                    st.success(f"🎉 Contratto N°{id_com} registrato con successo!")
                                     st.rerun()
                                 else:
-                                    st.error("Errore critico d'archiviazione: Impossibile scrivere su Google Drive. Verifica che l'account della piattaforma abbia i permessi di modifica per la cartella di destinazione.")
+                                    st.error("Errore d'archiviazione su Google Drive.")
                             
             with sub_registro:
                 st.markdown("### Registro Contratti Attivi")
@@ -488,7 +474,7 @@ else:
                                 st.markdown(f"📦 Oggetto: **{riga['id_bene']}** affidato a **{riga['nominativo']}** ({riga['tipo_soggetto']})")
                                 st.caption(f"Assegnatario il: {riga['data_consegna']} | ID Contratto: {riga['id_comodato']}")
                             with c2:
-                                if st.button("Riconsegna ↩", key=f"ric_{riga['id_comodato']}", type="primary", width="stretch"):
+                                if st.button("Riconsegna ↩", key=f"ric_{riga['id_comodato']}", type="primary", use_container_width=True):
                                     data_rientro = datetime.now().strftime("%d/%m/%Y %H:%M")
                                     pdf_rientro_bytes = genera_pdf_comodato(riga['id_comodato'], riga['nominativo'], riga['tipo_soggetto'], riga['id_bene'], data_rientro, "RICONSEGNA", utente_loggato=st.session_state.utente_corrente)
                                     
@@ -505,4 +491,3 @@ else:
     elif st.session_state.ruolo_utente == "collaboratore":
         st.markdown("### Nuova Richiesta Materiali")
         st.info("Area Richieste allineata ed attiva.")
-        
