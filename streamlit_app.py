@@ -97,7 +97,12 @@ def scarica_da_sheet(nome_scheda):
     if sh is None: return pd.DataFrame()
     try:
         worksheet = sh.worksheet(nome_scheda)
-        return pd.DataFrame(worksheet.get_all_records())
+        df = pd.DataFrame(worksheet.get_all_records())
+        
+        # FIX SICUREZZA: Se il foglio esiste ma mancano le colonne chiave, le forziamo
+        if nome_scheda == "Richieste_Preside" and (df.empty or "id_richiesta" not in df.columns):
+            df = pd.DataFrame(columns=["id_richiesta", "data_richiesta", "richiedente", "tipo_istanza", "categoria_bene", "oggetto", "motivazione", "stato"])
+        return df
     except gspread.exceptions.WorksheetNotFound:
         if "Inventario_Comodati" in nome_scheda:
             df_base = pd.DataFrame(columns=["id_bene", "tipo_bene", "descrizione", "stato"])
@@ -134,7 +139,6 @@ if "action" in params and "id" in params:
     
     df_link = scarica_da_sheet("Richieste_Preside")
     if not df_link.empty and "id_richiesta" in df_link.columns:
-        # Convertiamo l'ID a stringa per fare un confronto sicuro
         df_link["id_richiesta"] = df_link["id_richiesta"].astype(str)
         if id_req in df_link["id_richiesta"].values:
             nuovo_stato = "Approvata" if azione == "approve" else "Rifiutata"
@@ -152,8 +156,7 @@ def invia_notifica_email(id_richiesta, richiedente, tipo_istanza, oggetto, motiv
         from email.mime.text import MIMEText
         from email.mime.multipart import MIMEMultipart
 
-        # Recupero l'URL di base dell'applicazione corrente per costruire i link dinamici
-        url_applicazione = "https://magazzino.streamlit.app" # Sostituisci con il tuo URL esatto se differente
+        url_applicazione = "https://magazzino.streamlit.app" 
         
         url_approva = f"{url_applicazione}/?action=approve&id={id_richiesta}"
         url_rifiuta = f"{url_applicazione}/?action=reject&id={id_richiesta}"
@@ -170,7 +173,6 @@ def invia_notifica_email(id_richiesta, richiedente, tipo_istanza, oggetto, motiv
             msg['To'] = EMAIL_TESTING
             msg['Subject'] = f"📦 NUOVA ISTANZA [{tipo_istanza.upper()}] - {richiedente}"
             
-            # Corpo Email Strutturato in HTML Premium con Pulsanti Interattivi
             corpo_html = f"""
             <html>
             <body style="font-family: Arial, sans-serif; color: #334155; line-height: 1.6; background-color: #f8fafc; padding: 20px;">
@@ -207,7 +209,6 @@ def invia_notifica_email(id_richiesta, richiedente, tipo_istanza, oggetto, motiv
                     
                     <div style="text-align: center; margin-top: 20px; display: block; margin-bottom: 20px;">
                         <a href="{url_approva}" style="background-color: #16a34a; color: white; padding: 12px 28px; text-decoration: none; font-weight: bold; border-radius: 8px; margin-right: 15px; display: inline-block;">🟢 AUTORIZZA</a>
-                        
                         <a href="{url_rifiuta}" style="background-color: #dc2626; color: white; padding: 12px 28px; text-decoration: none; font-weight: bold; border-radius: 8px; display: inline-block;">🔴 RIFIUTA</a>
                     </div>
                     
@@ -474,7 +475,6 @@ else:
             if df_istanze_preside.empty:
                 st.info("Nessuna richiesta inoltrata al momento.")
             else:
-                # Modifica dello stato manuale da tabella per flessibilità amministrativa
                 st.dataframe(df_istanze_preside, use_container_width=True, hide_index=True)
             
         with tab_comodati:
@@ -664,9 +664,12 @@ else:
                         with st.spinner("Invio e notifica email in corso..."):
                             df_registro = scarica_da_sheet("Richieste_Preside")
                             
-                            # Calcolo di un ID numerico univoco incrementale per la richiesta
-                            id_req_num = pd.to_numeric(df_registro["id_richiesta"], errors='coerce')
-                            nuovo_id_richiesta = int(id_req_num.max()) + 1 if not id_req_num.dropna().empty else 101
+                            # Calcolo sicuro ID con fallback se la colonna è vuota o difettosa
+                            try:
+                                id_req_num = pd.to_numeric(df_registro["id_richiesta"], errors='coerce')
+                                nuovo_id_richiesta = int(id_req_num.max()) + 1 if not id_req_num.dropna().empty else 101
+                            except Exception:
+                                nuovo_id_richiesta = 101
                             
                             nuova_richiesta_df = pd.DataFrame([{
                                 "id_richiesta": nuovo_id_richiesta,
@@ -681,10 +684,9 @@ else:
                             
                             carica_su_sheet(pd.concat([df_registro, nuova_richiesta_df], ignore_index=True), "Richieste_Preside")
                             
-                            # Invio email reale in HTML con i due pulsanti interattivi passandogli l'ID univoco
                             invia_notifica_email(nuovo_id_richiesta, st.session_state.utente_corrente, "Comodato d'Uso", oggetto_richiesta.strip(), motivazione_richiesta.strip())
-                            
                             st.success(f"🎉 Richiesta di comodato inoltrata alla Preside e notificata con pulsanti rapidi a {EMAIL_TESTING}!")
+                            st.rerun()
                             
         elif tipo_corrente == "Materiale":
             st.markdown("## 📦 Modulo B: Richiesta Materiale Logistico / Consumo")
@@ -711,8 +713,11 @@ else:
                         with st.spinner("Invio e notifica email in corso..."):
                             df_registro = scarica_da_sheet("Richieste_Preside")
                             
-                            id_req_num = pd.to_numeric(df_registro["id_richiesta"], errors='coerce')
-                            nuovo_id_richiesta = int(id_req_num.max()) + 1 if not id_req_num.dropna().empty else 101
+                            try:
+                                id_req_num = pd.to_numeric(df_registro["id_richiesta"], errors='coerce')
+                                nuovo_id_richiesta = int(id_req_num.max()) + 1 if not id_req_num.dropna().empty else 101
+                            except Exception:
+                                nuovo_id_richiesta = 101
                             
                             nuova_richiesta_df = pd.DataFrame([{
                                 "id_richiesta": nuovo_id_richiesta,
@@ -727,7 +732,6 @@ else:
                             
                             carica_su_sheet(pd.concat([df_registro, nuova_richiesta_df], ignore_index=True), "Richieste_Preside")
                             
-                            # Invio email in HTML con i pulsanti interattivi
                             invia_notifica_email(nuovo_id_richiesta, st.session_state.utente_corrente, "Fornitura Materiale", oggetto_richiesta.strip(), motivazione_richiesta.strip())
-                            
                             st.success(f"🎉 Richiesta materiale registrata e notificata con pulsanti rapidi a {EMAIL_TESTING}!")
+                            st.rerun()
