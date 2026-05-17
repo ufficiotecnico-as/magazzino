@@ -396,7 +396,7 @@ else:
                     with st.container(border=True):
                         c1, c2 = st.columns([3, 1])
                         with c1:
-                            st.markdown(f"👤 Soggetto: **{riga['nominativo']}** ({riga['tipo_soggetto']}) — Email: {riga['email']}")
+                            st.markdown(f"👤 Subject: **{riga['nominativo']}** ({riga['tipo_soggetto']}) — Email di contatto: {riga['email']}")
                             st.markdown(f"📦 Bene Richiesto: **{riga['categoria_bene']}** | *Motivazione:* {riga['motivazione']}")
                         with c2:
                             if st.button("Forza Approvazione Amministrativa ✅", key=f"force_app_{idx}"):
@@ -583,16 +583,16 @@ else:
             help="Scegli accuratamente il canale per instradare la pratica al reparto logistico preposto."
         )
         
-        # SOTTO-FLUSSO A: COMODATI D'USO (Richiede validazione e invia mail alla Dirigente con Token)
+        # SOTTO-FLUSSO A: COMODATI D'USO (Invia formalmente a marcobrunetti14@gmail.com con link approvazione rapida)
         if tipo_richiesta_utente == "📋 Richiesta Dispositivi in Comodato d'Uso (Docenti / Alunni)":
             st.markdown("#### Compilazione Istanza Elettronica per l'Assegnazione di un Bene d'Istituto")
             with st.form("form_istanza_comodato"):
                 t_sog = st.selectbox("Ruolo del Richiedente:", ["Insegnante / Personale Interno", "Alunno", "Genitore / Tutore Legale"])
-                mail_sog = st.text_input("Indirizzo E-mail Istituzionale per le comunicazioni:")
+                mail_sog = st.text_input("Indirizzo E-mail del Richiedente per comunicazioni interne:")
                 cat_bene = st.selectbox("Categoria del Dispositivo:", ["PC Notebook", "Chiave d'Accesso"])
                 mot_bene = st.text_area("Motivazione dettagliata a supporto della richiesta:")
                 
-                if st.form_submit_button("Invia Richiesta Formale alla Dirigente", use_container_width=True):
+                if st.form_submit_button("Invia Richiesta Formale per Approvazione", use_container_width=True):
                     if mail_sog.strip() and mot_bene.strip():
                         df_ist_c = scarica_da_sheet("Istanze_Comodati")
                         stamp = datetime.now().strftime("%d/%m/%Y %H:%M")
@@ -612,9 +612,10 @@ else:
                         }])
                         carica_su_sheet(pd.concat([df_ist_c, nuova_istanza], ignore_index=True), "Istanze_Comodati")
                         
-                        # INVIO PAYLOAD ALL'INTERMEDIARIO PER DISPACCIAMENTO MAIL ALLA DIRIGENTE
+                        # INVIO PAYLOAD RIGIDO: Destinatario impostato formalmente su marcobrunetti14@gmail.com
                         payload_notifica = {
                             "azione": "nuova_istanza",
+                            "destinatario_approvazione": "marcobrunetti14@gmail.com",
                             "id_istanza": id_ist,
                             "richiedente": st.session_state.utente_corrente,
                             "ruolo": t_sog,
@@ -625,7 +626,7 @@ else:
                         }
                         invia_notifica_silenziosa_gas(payload_notifica)
                         
-                        st.success(f"Istanza {id_ist} inviata correttamente. Il sistema ha inoltrato la mail di notifica alla Dirigente per l'approvazione rapida.")
+                        st.success(f"Istanza {id_ist} inviata correttamente. Il sistema ha inoltrato la mail di notifica per l'approvazione a marcobrunetti14@gmail.com.")
                     else: st.error("Tutti i campi del modulo sono obbligatori.")
                     
         # SOTTO-FLUSSO B: MATERIALI STANDARD (Inoltro diretto ai magazzini senza filtro Dirigente)
@@ -648,6 +649,6 @@ else:
                             "stato": "In Lavorazione",
                             "note": note_richiesta.strip()
                         }])
-                        carica_su_sheet(pd.concat([df_dest, nuovo_ticket], ignore_index=True), "Richieste")
+                        carica_su_sheet(pd.concat([df_dest, nuovo_ticket], ignore_index=True), MAPPA_SCHEDE[mag_dest]["richieste"])
                         st.success(f"Richiesta inviata ed inserita nel registro logistico del reparto: {mag_dest}!")
                     else: st.error("Inserisci l'articolo prima di procedere.")
