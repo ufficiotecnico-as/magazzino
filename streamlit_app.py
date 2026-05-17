@@ -532,7 +532,7 @@ else:
             with st.form("form_fabb_standard"):
                 mat = st.text_input("Descrizione materiale richiesto:")
                 qta = st.text_input("Quantità o pacchi stimati:")
-                note = st.text_area("Note urgenza:")
+                note = st.text_area("Note vuote/urgenza:")
                 if st.form_submit_button("Invia Segnalazione Fabbisogno"):
                     if mat.strip():
                         df_rm = scarica_da_sheet("Richieste_Preventivo_Magazzino")
@@ -540,4 +540,5 @@ else:
                         nuovo = pd.DataFrame([{"id_richiesta_mag": id_rm, "data_creazione": datetime.now().strftime("%d/%m/%Y %H:%M"), "magazzino_origine": st.session_state.magazzino_selezionato, "materiale_richiesto": mat, "quantita_esimata": qta, "stato_iter": "In attesa di preventivi", "note": note}])
                         carica_su_sheet(pd.concat([df_rm, nuovo], ignore_index=True), "Richieste_Preventivo_Magazzino")
                         st.success(f"Richiesta inoltrata! ID REQ interna: {id_rm}")
-                    else: st.error("Specificare il materiale.")
+                    else:
+                        st.error("Specificare il materiale.")
