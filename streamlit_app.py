@@ -270,12 +270,12 @@ def carica_su_drive_unico(file_bytes, nome_file, mime_type, nome_cartella_dest):
         return True
     except Exception: return None
 
-# --- APPS SCRIPT SILENT DISPATCHER (GESTIONE EMAIL NOTIFICHE) ---
+# --- APPS SCRIPT SILENT DISPATCHER ---
 def invia_notifica_silenziosa_gas(payload):
     try: requests.post(URL_INTERMEDIARIO_SILENZIOSO, json=payload, timeout=8)
     except Exception: pass
 
-# --- COMPONENTE HTML PAD FIRMA CON COPIA AUTOMATICA ---
+# --- PAD FIRMA HTML ---
 def rendering_pad_firma_html(id_canvas):
     return f"""
     <div style="background:#ffffff; border:2px dashed #cbd5e1; padding:12px; border-radius:10px; max-width:480px; font-family:sans-serif;">
@@ -314,12 +314,12 @@ def rendering_pad_firma_html(id_canvas):
     </script>
     """
 
-# --- INIZIALIZZAZIONE DELLO STATO DELLA SESSIONE ---
+# --- INIZIALIZZAZIONE STATO SESSIONE ---
 if "ruolo_utente" not in st.session_state: st.session_state.ruolo_utente = None
 if "utente_corrente" not in st.session_state: st.session_state.utente_corrente = ""
 if "magazzino_selezionato" not in st.session_state: st.session_state.magazzino_selezionato = None
 
-# --- STRUTTURA LOG PARAMS / APPROVAZIONI RAPIDE DIRIGENTE ---
+# --- APPROVAZIONI LINK RAPIDI DIRIGENTE ---
 query_params = st.query_params
 if "action" in query_params and "token" in query_params:
     azione = query_params["action"]
@@ -332,12 +332,12 @@ if "action" in query_params and "token" in query_params:
             nuovo_st = "Approvata da Dirigente" if azione == "approva" else "Rifiutata da Dirigente"
             df_cerca.loc[idx_riga, "stato"] = nuovo_st
             carica_su_sheet(df_cerca, "Istanze_Comodati")
-            st.success(f"Operazione completata con successo: Richiesta impostata su '{nuovo_st}'. Puoi chiudere questa scheda.")
-        else: st.warning(f"Questa istanza è già stata gestita. Stato attuale: {stato_attuale}")
-    else: st.error("Token di autorizzazione non valido o scaduto.")
+            st.success(f"Pratica aggiornata: '{nuovo_st}'.")
+        else: st.warning(f"Già gestita. Stato: {stato_attuale}")
+    else: st.error("Token non valido.")
     st.stop()
 
-# --- BLOCCO ROUTER DI AUTENTICAZIONE ---
+# --- INTERFACCIA DI ACCESSO / LOGIN ---
 if st.session_state.ruolo_utente is None:
     col_l, col_c, col_r = st.columns([1, 1.8, 1])
     with col_c:
@@ -345,6 +345,7 @@ if st.session_state.ruolo_utente is None:
         st.markdown("<h2 style='text-align: center;'>Piattaforma Logistica di Istituto</h2>", unsafe_allow_html=True)
         with st.container(border=True):
             scelta = st.radio("Seleziona il tuo profilo d'accesso:", ["Collaboratore / Richiedente", "Staff Interno / Amministrazione"])
+            
             if scelta == "Collaboratore / Richiedente":
                 nome = st.text_input("Inserisci Nome e Cognome:")
                 if st.button("Accedi all'Area Richieste", type="primary", use_container_width=True):
@@ -352,6 +353,8 @@ if st.session_state.ruolo_utente is None:
                         st.session_state.ruolo_utente = "collaboratore"
                         st.session_state.utente_corrente = nome.strip()
                         st.rerun()
+                    else:
+                        st.error("Inserisci il tuo nome prima di continuare.")
             else:
                 pwd = st.text_input("Inserisci il Codice di Autorizzazione Reparto:", type="password")
                 if st.button("Autentica ed Entra", type="primary", use_container_width=True):
@@ -366,9 +369,208 @@ if st.session_state.ruolo_utente is None:
                         st.rerun()
                     else: st.error("Codice di accesso non valido.")
 else:
+    # --- BARRA UTENTE DI LOGOUT ---
     col_t, col_b_logout = st.columns([4, 1])
     with col_t: st.markdown(f"Utente Connesso: **{st.session_state.utente_corrente.upper()}**")
     with col_b_logout:
         if st.button("🚪 Esci / Cambia Profilo", use_container_width=True):
             st.session_state.ruolo_utente = None
-            st.session_state.magazzino_se
+            st.session_state.magazzino_selezionato = None
+            st.session_state.utente_corrente = ""
+            st.rerun()
+            
+    st.image(URL_LOGO, use_container_width=True)
+
+    # ==========================================
+    # WORKFLOW A: INTERFACCIA COLLABORATORI (COMPLETAMENTE ISOLATA)
+    # ==========================================
+    if st.session_state.ruolo_utente == "collaboratore":
+        st.markdown(f"### Benvenuto Area Risorse, {st.session_state.utente_corrente}")
+        
+        tipo_richiesta_utente = st.radio(
+            "Seleziona la tipologia di richiesta da inoltrare:",
+            ["📋 Richiesta Dispositivi in Comodato d'Uso (Docenti / Alunni)", "📦 Richiesta Materiali e Consumabili Standard (Personale ATA / Officina)"]
+        )
+        
+        if tipo_richiesta_utente == "📋 Richiesta Dispositivi in Comodato d'Uso (Docenti / Alunni)":
+            st.markdown("#### Compilazione Istanza Elettronica per l'Assegnazione di un Bene d'Istituto")
+            with st.form("form_istanza_comodato"):
+                t_sog = st.selectbox("Ruolo del Richiedente:", ["Insegnante / Personale Interno", "Alunno", "Genitore / Tutore Legale"])
+                mail_sog = st.text_input("Indirizzo E-mail del Richiedente per comunicazioni interne:")
+                cat_bene = st.selectbox("Categoria del Dispositivo:", ["PC Notebook", "Chiave d'Accesso"])
+                mot_bene = st.text_area("Motivazione dettagliata a supporto della richiesta:")
+                
+                if st.form_submit_button("Invia Richiesta Formale per Approvazione", use_container_width=True):
+                    if mail_sog.strip() and mot_bene.strip():
+                        df_ist_c = scarica_da_sheet("Istanze_Comodati")
+                        stamp = datetime.now().strftime("%d/%m/%Y %H:%M")
+                        id_ist = f"IST-{datetime.now().strftime('%M%S')}"
+                        token_sicurezza = f"TK-{base64.b64encode(id_ist.encode()).decode()[:10].upper()}"
+                        
+                        nuova_istanza = pd.DataFrame([{
+                            "id_istanza": id_ist,
+                            "timestamp": stamp,
+                            "nominativo": st.session_state.utente_corrente,
+                            "tipo_soggetto": t_sog,
+                            "email": mail_sog.strip(),
+                            "categoria_bene": cat_bene,
+                            "motivazione": mot_bene.strip(),
+                            "stato": "In attesa di Dirigente",
+                            "token_approvazione": token_sicurezza
+                        }])
+                        carica_su_sheet(pd.concat([df_ist_c, nuova_istanza], ignore_index=True), "Istanze_Comodati")
+                        
+                        payload_notifica = {
+                            "azione": "nuova_istanza",
+                            "destinatario_approvazione": "marcobrunetti14@gmail.com",
+                            "id_istanza": id_ist,
+                            "richiedente": st.session_state.utente_corrente,
+                            "ruolo": t_sog,
+                            "email_richiedente": mail_sog.strip(),
+                            "bene": cat_bene,
+                            "motivazione": mot_bene.strip(),
+                            "token": token_sicurezza
+                        }
+                        invia_notifica_silenziosa_gas(payload_notifica)
+                        
+                        st.success(f"Istanza {id_ist} registrata! Notifica inviata a marcobrunetti14@gmail.com.")
+                        
+                        # Fallback di emergenza visivo a schermo
+                        st.markdown("---")
+                        st.warning("⚠️ **INTERFACCIA DI SBLOCCO IMMEDIATO (Se non vuoi attendere la mail):**")
+                        url_app = f"https://magazzinoscarpa.streamlit.app/?action=approva&token={token_sicurezza}"
+                        url_ref = f"https://magazzinoscarpa.streamlit.app/?action=rifiuta&token={token_sicurezza}"
+                        st.markdown(f"🔗 **[CLICCA QUI PER APPROVARE ADESSO]({url_app})**")
+                        st.markdown(f"🔗 **[CLICCA QUI PER RIFIUTARE ADESSO]({url_ref})**")
+                    else:
+                        st.error("Tutti i campi del modulo sono obbligatori.")
+                        
+        else:
+            st.markdown("#### Richiesta Fornitura Materiali Standard")
+            with st.form("nuova_richiesta_standard"):
+                mag_dest = st.selectbox("Seleziona il Magazzino di Destinazione:", ["Personale ATA", "Officina"])
+                art_richiesto = st.text_input("Descrizione dell'articolo o materiale richiesto:")
+                qta_richiesta = st.number_input("Quantità necessaria:", min_value=1, value=1, step=1)
+                note_richiesta = st.text_area("Eventuali note o specifiche aggiuntive:")
+                
+                if st.form_submit_button("Invia Richiesta al Magazzino", use_container_width=True):
+                    if art_richiesto.strip():
+                        nome_scheda_corretta = MAPPA_SCHEDE[mag_dest]["richieste"]
+                        df_dest = scarica_da_sheet(nome_scheda_corretta)
+                        
+                        nuovo_ticket = pd.DataFrame([{
+                            "richiedente": st.session_state.utente_corrente,
+                            "articolo": art_richiesto.strip(),
+                            "quantita": str(qta_richiesta),
+                            "data": datetime.now().strftime("%d/%m/%Y %H:%M"),
+                            "stato": "In Lavorazione",
+                            "note": note_richiesta.strip()
+                        }])
+                        carica_su_sheet(pd.concat([df_dest, nuovo_ticket], ignore_index=True), nome_scheda_corretta)
+                        st.success(f"Richiesta salvata nel registro: {nome_scheda_corretta}!")
+                    else:
+                        st.error("Inserisci l'articolo prima di procedere.")
+
+    # ==========================================
+    # WORKFLOW B: AMMINISTRAZIONE GENERALE (ADMIN)
+    # ==========================================
+    elif st.session_state.ruolo_utente == "admin":
+        tab_istanze, tab_comodati_reg, tab_giacenze_totali = st.tabs(["📩 ISTANZE COMODATI", "📜 REGISTRO ASSEGNAZIONI", "🏢 GIACENZE"])
+        
+        with tab_istanze:
+            df_ist = scarica_da_sheet("Istanze_Comodati")
+            filtro_attesa = df_ist[df_ist["stato"] == "In attesa di Dirigente"] if not df_ist.empty else pd.DataFrame()
+            if filtro_attesa.empty: st.info("Nessuna richiesta in sospeso.")
+            else:
+                for idx, riga in filtro_attesa.iterrows():
+                    with st.container(border=True):
+                        st.markdown(f"👤 **{riga['nominativo']}** | Bene: **{riga['categoria_bene']}**")
+                        if st.button("Forza Approvazione ✅", key=f"force_{idx}"):
+                            df_ist.loc[idx, "stato"] = "Approvata da Dirigente"
+                            carica_su_sheet(df_ist, "Istanze_Comodati")
+                            st.rerun()
+        with tab_comodati_reg:
+            st.dataframe(scarica_da_sheet("Registro_Comodati"), use_container_width=True, hide_index=True)
+        with tab_giacenze_totali:
+            for m in LISTA_MAGAZZINI:
+                st.markdown(f"#### 📦 {m}")
+                st.dataframe(scarica_da_sheet(MAPPA_SCHEDE[m]["inventario"]), use_container_width=True, hide_index=True)
+
+    # ==========================================
+    # WORKFLOW C: TECNICI INFORMATICI
+    # ==========================================
+    elif st.session_state.ruolo_utente == "magazziniere" and st.session_state.magazzino_selezionato == "Tecnici Informatici":
+        tab_ist, tab_cons, tab_ric, tab_inv, tab_reg = st.tabs(["📥 Istanze", "✍️ Consegna", "↩️ Riconsegne", "📋 Inventario", "📜 Registro"])
+        
+        df_istanze = scarica_da_sheet("Istanze_Comodati")
+        df_inv_c = scarica_da_sheet("Inventario_Comodati")
+        df_reg_c = scarica_da_sheet("Registro_Comodati")
+        
+        with tab_ist:
+            ist_ok = df_istanze[df_istanze["stato"] == "Approvata da Dirigente"] if not df_istanze.empty else pd.DataFrame()
+            st.dataframe(ist_ok, use_container_width=True, hide_index=True)
+            
+        with tab_cons:
+            ist_pronte = df_istanze[df_istanze["stato"] == "Approvata da Dirigente"]["nominativo"].tolist() if not df_istanze.empty else []
+            if not ist_pronte: st.warning("Nessuna richiesta approvata.")
+            else:
+                with st.form("p_consegna"):
+                    sog_sel = st.selectbox("Assegnatario:", ist_pronte)
+                    riga = df_istanze[df_istanze["nominativo"] == sog_sel].iloc[0]
+                    beni_disp = df_inv_c[df_inv_c["stato"] == "Disponibile"]["id_bene"].tolist() if not df_inv_c.empty else []
+                    bene_sel = st.selectbox("Seriale:", beni_disp if beni_disp else ["Nessuno"])
+                    st.components.v1.html(rendering_pad_firma_html("canvas_c"), height=260)
+                    cod_f = st.text_area("Incolla codice firma:")
+                    if st.form_submit_button("Emetti"):
+                        if cod_f.strip() and bene_sel != "Nessuno":
+                            next_id = int(df_reg_c["id_comodato"].astype(float).max()) + 1 if not df_reg_c.empty else 5001
+                            ora = datetime.now().strftime("%d/%m/%Y %H:%M")
+                            pdf = genera_pdf_comodato(next_id, riga['nominativo'], riga['tipo_soggetto'], bene_sel, ora, "CONSEGNA", cod_f.strip(), st.session_state.utente_corrente)
+                            if carica_su_drive_unico(pdf, f"Consegna_{next_id}.pdf", "application/pdf", "Comodati_Consegne"):
+                                df_istanze.loc[df_istanze["id_istanza"] == riga["id_istanza"], "stato"] = "Evasa"
+                                carica_su_sheet(df_istanze, "Istanze_Comodati")
+                                n_c = pd.DataFrame([{"id_comodato": next_id, "tipo_soggetto": riga['tipo_soggetto'], "nominativo": riga['nominativo'], "id_bene": bene_sel, "data_consegna": ora, "stato_comodato": "In Corso"}])
+                                carica_su_sheet(pd.concat([df_reg_c, n_c], ignore_index=True), "Registro_Comodati")
+                                df_inv_c.loc[df_inv_c["id_bene"] == bene_sel, "stato"] = "Assegnato"
+                                carica_su_sheet(df_inv_c, "Inventario_Comodati")
+                                st.success("Evaso!")
+                                st.rerun()
+        with tab_ric:
+            c_attivi = df_reg_c[df_reg_c["stato_comodato"] == "In Corso"] if not df_reg_c.empty else pd.DataFrame()
+            if c_attivi.empty: st.info("Nessun contratto attivo.")
+            else:
+                for idx, r in c_attivi.iterrows():
+                    with st.container(border=True):
+                        st.markdown(f"📋 Contratto: {r['id_comodato']} - {r['nominativo']}")
+                        if st.button("Scarica Restituzione", key=f"ric_{idx}"):
+                            df_reg_c.loc[idx, "stato_comodato"] = "Riconsegnato"
+                            carica_su_sheet(df_reg_c, "Registro_Comodati")
+                            df_inv_c.loc[df_inv_c["id_bene"] == r["id_bene"], "stato"] = "Disponibile"
+                            carica_su_sheet(df_inv_c, "Inventario_Comodati")
+                            st.success("Riconsegnato!")
+                            st.rerun()
+        with tab_inv: st.dataframe(df_inv_c, use_container_width=True, hide_index=True)
+        with tab_reg: st.dataframe(df_reg_c, use_container_width=True, hide_index=True)
+
+    # ==========================================
+    # WORKFLOW D: MAGAZZINI STANDARD (ATA / OFFICINA)
+    # ==========================================
+    elif st.session_state.ruolo_utente == "magazziniere":
+        st.markdown(f"## 📦 Magazzino: {st.session_state.magazzino_selezionato}")
+        df_inv = scarica_da_sheet(MAPPA_SCHEDE[st.session_state.magazzino_selezionato]["inventario"])
+        df_req = scarica_da_sheet(MAPPA_SCHEDE[st.session_state.magazzino_selezionato]["richieste"])
+        
+        t_inv, t_req = st.tabs(["Giacenze", "Ordini"])
+        with t_inv:
+            st.dataframe(df_inv, use_container_width=True, hide_index=True)
+        with t_req:
+            attesa = df_req[df_req["stato"] == "In Lavorazione"] if not df_req.empty else pd.DataFrame()
+            if attesa.empty: st.info("Nessun ordine.")
+            else:
+                for idx, riga in attesa.iterrows():
+                    with st.container(border=True):
+                        st.markdown(f"👤 {riga['richiedente']} -> {riga['articolo']} x{riga['quantita']}")
+                        if st.button("Evadi ✅", key=f"ev_{idx}"):
+                            df_req.loc[idx, "stato"] = "Evaso"
+                            carica_su_sheet(df_req, MAPPA_SCHEDE[st.session_state.magazzino_selezionato]["richieste"])
+                            st.rerun()
