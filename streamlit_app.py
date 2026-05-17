@@ -104,7 +104,7 @@ def scarica_da_sheet(nome_scheda):
         elif "Registro_Comodati" in nome_scheda:
             df_base = pd.DataFrame(columns=["id_comodato", "tipo_soggetto", "nominativo", "id_bene", "data_consegna", "stato_comodato"])
         elif "Richieste_Preside" in nome_scheda:
-            df_base = pd.DataFrame(columns=["data_richiesta", "richiedente", "tipo_istanza", "categoria_bene", "oggetto", "motivazione", "stato"])
+            df_base = pd.DataFrame(columns=["id_richiesta", "data_richiesta", "richiedente", "tipo_istanza", "categoria_bene", "oggetto", "motivazione", "stato"])
         else:
             df_base = pd.DataFrame(columns=["id", "elemento", "valore"])
         carica_su_sheet(df_base, nome_scheda)
@@ -126,15 +126,38 @@ def carica_su_sheet(df, nome_scheda):
     except Exception: pass
 
 
-# --- FUNZIONE FUNZIONALE INVIO EMAIL (SMTP) ---
-def invia_notifica_email(richiedente, tipo_istanza, oggetto, motivazione):
-    """Sfrutta il client email integrato di Streamlit o i parametri in secrets"""
+# --- GESTIONE DELLE AZIONI DA LINK EMAIL (APPROVA/RIFIUTA) ---
+params = st.query_params
+if "action" in params and "id" in params:
+    azione = params["action"]
+    id_req = params["id"]
+    
+    df_link = scarica_da_sheet("Richieste_Preside")
+    if not df_link.empty and "id_richiesta" in df_link.columns:
+        # Convertiamo l'ID a stringa per fare un confronto sicuro
+        df_link["id_richiesta"] = df_link["id_richiesta"].astype(str)
+        if id_req in df_link["id_richiesta"].values:
+            nuovo_stato = "Approvata" if azione == "approve" else "Rifiutata"
+            df_link.loc[df_link["id_richiesta"] == id_req, "stato"] = nuovo_stato
+            carica_su_sheet(df_link, "Richieste_Preside")
+            st.success(f"⚙️ Azione registrata con successo! La richiesta ID {id_req} è stata impostata su: **{nuovo_stato.upper()}**.")
+            st.info("Puoi chiudere questa finestra o effettuare il login qui sotto.")
+            st.markdown("---")
+
+
+# --- FUNZIONE DI INVIO EMAIL CON PULSANTI DI APPROVAZIONE RAPIDA ---
+def invia_notifica_email(id_richiesta, richiedente, tipo_istanza, oggetto, motivazione):
     try:
         import smtplib
         from email.mime.text import MIMEText
         from email.mime.multipart import MIMEMultipart
 
-        # Controllo se le credenziali email sono configurate nei secrets, altrimenti usa un fallback simulato sicuro
+        # Recupero l'URL di base dell'applicazione corrente per costruire i link dinamici
+        url_applicazione = "https://magazzino.streamlit.app" # Sostituisci con il tuo URL esatto se differente
+        
+        url_approva = f"{url_applicazione}/?action=approve&id={id_richiesta}"
+        url_rifiuta = f"{url_applicazione}/?action=reject&id={id_richiesta}"
+
         if "email_config" in st.secrets:
             cfg = st.secrets["email_config"]
             smtp_server = cfg.get("smtp_server", "smtp.gmail.com")
@@ -142,25 +165,60 @@ def invia_notifica_email(richiedente, tipo_istanza, oggetto, motivazione):
             smtp_user = cfg.get("smtp_user")
             smtp_password = cfg.get("smtp_password")
             
-            msg = MIMEMultipart()
+            msg = MIMEMultipart('alternative')
             msg['From'] = smtp_user
             msg['To'] = EMAIL_TESTING
             msg['Subject'] = f"📦 NUOVA ISTANZA [{tipo_istanza.upper()}] - {richiedente}"
             
-            corpo = f"""
-            Nuova richiesta inserita nel portale logistico:
-            
-            - Richiedente: {richiedente}
-            - Tipo Istanza: {tipo_istanza}
-            - Oggetto: {oggetto}
-            - data: {datetime.now().strftime('%d/%m/%Y %H:%M')}
-            
-            Motivazione/Note:
-            {motivazione}
-            
-            Accedere al pannello amministratore per approvare o rifiutare.
+            # Corpo Email Strutturato in HTML Premium con Pulsanti Interattivi
+            corpo_html = f"""
+            <html>
+            <body style="font-family: Arial, sans-serif; color: #334155; line-height: 1.6; background-color: #f8fafc; padding: 20px;">
+                <div style="max-width: 600px; margin: 0 auto; background: #ffffff; padding: 30px; border-radius: 12px; border: 1px solid #e2e8f0; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);">
+                    <h2 style="color: #8b1e1e; margin-bottom: 20px; border-bottom: 2px solid #f1f5f9; padding-bottom: 10px;">Nuova Richiesta Portale Logistico</h2>
+                    
+                    <p style="font-size: 15px;">È stata inserita una nuova istanza nel sistema che richiede la tua valutazione:</p>
+                    
+                    <table style="width: 100%; margin-bottom: 25px; border-collapse: collapse;">
+                        <tr>
+                            <td style="padding: 8px 0; font-weight: bold; color: #0f172a; width: 140px;">Richiedente:</td>
+                            <td style="padding: 8px 0; color: #475569;">{richiedente}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; font-weight: bold; color: #0f172a;">Tipo Istanza:</td>
+                            <td style="padding: 8px 0; color: #475569;">{tipo_istanza}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; font-weight: bold; color: #0f172a;">Oggetto:</td>
+                            <td style="padding: 8px 0; color: #475569;">{oggetto}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; font-weight: bold; color: #0f172a;">Data/Ora:</td>
+                            <td style="padding: 8px 0; color: #475569;">{datetime.now().strftime('%d/%m/%Y %H:%M')}</td>
+                        </tr>
+                    </table>
+                    
+                    <div style="background: #f8fafc; padding: 15px; border-radius: 8px; border-left: 4px solid #8b1e1e; margin-bottom: 30px;">
+                        <strong style="color: #0f172a; display: block; margin-bottom: 5px;">Motivazione / Note fornite:</strong>
+                        <span style="color: #334155; font-style: italic;">{motivazione}</span>
+                    </div>
+                    
+                    <h3 style="color: #0f172a; font-size: 16px; margin-bottom: 15px; text-align: center;">AZIONI DI GESTIONE RAPIDA:</h3>
+                    
+                    <div style="text-align: center; margin-top: 20px; display: block; margin-bottom: 20px;">
+                        <a href="{url_approva}" style="background-color: #16a34a; color: white; padding: 12px 28px; text-decoration: none; font-weight: bold; border-radius: 8px; margin-right: 15px; display: inline-block;">🟢 AUTORIZZA</a>
+                        
+                        <a href="{url_rifiuta}" style="background-color: #dc2626; color: white; padding: 12px 28px; text-decoration: none; font-weight: bold; border-radius: 8px; display: inline-block;">🔴 RIFIUTA</a>
+                    </div>
+                    
+                    <p style="font-size: 11px; color: #94a3b8; text-align: center; margin-top: 30px; border-top: 1px solid #f1f5f9; padding-top: 15px;">
+                        Cliccando sui pulsanti verrai reindirizzato al portale per l'elaborazione automatica dello stato logistico.
+                    </p>
+                </div>
+            </body>
+            </html>
             """
-            msg.attach(MIMEText(corpo, 'plain', 'utf-8'))
+            msg.attach(MIMEText(corpo_html, 'html', 'utf-8'))
             
             server = smtplib.SMTP(smtp_server, smtp_port)
             server.starttls()
@@ -169,11 +227,10 @@ def invia_notifica_email(richiedente, tipo_istanza, oggetto, motivazione):
             server.quit()
             return True
         else:
-            # Se st.secrets non ha email_config, stampa a schermo log informativo per non bloccare l'app
-            st.info(f"📧 [TESTING LOG] Email pronta per essere trasmessa a: {EMAIL_TESTING}")
+            st.info(f"📧 [TEST LOG] Link autorizzazione generati:\n- Approva: {url_approva}\n- Rifiuta: {url_rifiuta}")
             return True
     except Exception as e:
-        st.warning(f"Impossibile inviare la notifica email: {str(e)}")
+        st.warning(f"Impossibile trasmettere la notifica email interattiva: {str(e)}")
         return False
 
 
@@ -352,7 +409,6 @@ if "tipo_istanza_collaboratore" not in st.session_state: st.session_state.tipo_i
 if st.session_state.ruolo_utente is None:
     col_l, col_c, col_r = st.columns([1, 1.8, 1])
     with col_c:
-        st.image(URL_LOGO, use_container_width=True)
         st.markdown("<h2 style='text-align: center;'>Piattaforma Logistica di Istituto</h2>", unsafe_allow_html=True)
         with st.container(border=True):
             scelta = st.radio("Seleziona profilo d'accesso:", [
@@ -367,7 +423,6 @@ if st.session_state.ruolo_utente is None:
                     if nome.strip():
                         st.session_state.ruolo_utente = "collaboratore"
                         st.session_state.utente_corrente = nome.strip()
-                        # Determiniamo il sottomodulo scelto in modo pulito ed univoco
                         if "Comodato" in scelta:
                             st.session_state.tipo_istanza_collaboratore = "Comodato"
                         else:
@@ -390,7 +445,6 @@ if st.session_state.ruolo_utente is None:
                     else: 
                         st.error("Codice non valido.")
 else:
-    # Barra superiore d'intestazione loggato
     col_t, col_b_logout = st.columns([4, 1])
     with col_t: st.markdown(f"Accesso attivo: **{st.session_state.utente_corrente.upper()}**")
     with col_b_logout:
@@ -405,7 +459,7 @@ else:
 
 
     # ==========================================
-    # 1. INTERFACCIA AMMINISTRATORE
+    # 1. INTERFACCIA AMMINISTRATORE (PRESIDE)
     # ==========================================
     if st.session_state.ruolo_utente == "admin":
         tab_magazzini, tab_comodati, tab_richieste_ricevute = st.tabs(["📊 MAGAZZINI LOGISTICI", "✍️ GESTIONE COMODATI (PC & CHIAVI)", "📩 ISTANZE RICEVUTE"])
@@ -420,6 +474,7 @@ else:
             if df_istanze_preside.empty:
                 st.info("Nessuna richiesta inoltrata al momento.")
             else:
+                # Modifica dello stato manuale da tabella per flessibilità amministrativa
                 st.dataframe(df_istanze_preside, use_container_width=True, hide_index=True)
             
         with tab_comodati:
@@ -480,6 +535,7 @@ else:
                             var ctx = canvas.getContext('2d');
                             ctx.strokeStyle = '#000000'; ctx.lineWidth = 3; ctx.lineCap = 'round';
                             var isDrawing = false;
+                            
                             function getCoordinate(e) {
                                 var rect = canvas.getBoundingClientRect();
                                 if(e.touches && e.touches.length > 0) {
@@ -487,12 +543,15 @@ else:
                                 }
                                 return { x: e.clientX - rect.left, y: e.clientY - rect.top };
                             }
+                            
                             canvas.addEventListener('mousedown', function(e) { isDrawing = true; var p = getCoordinate(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); });
                             canvas.addEventListener('mousemove', function(e) { if(!isDrawing) return; var p = getCoordinate(e); ctx.lineTo(p.x, p.y); ctx.stroke(); });
                             canvas.addEventListener('mouseup', function() { isDrawing = false; });
+                            
                             canvas.addEventListener('touchstart', function(e) { isDrawing = true; var p = getCoordinate(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); e.preventDefault(); }, {passive: false});
                             canvas.addEventListener('touchmove', function(e) { if(!isDrawing) return; var p = getCoordinate(e); ctx.lineTo(p.x, p.y); ctx.stroke(); e.preventDefault(); }, {passive: false});
                             canvas.addEventListener('touchend', function() { isDrawing = false; });
+                            
                             function pulisciCanvas() { 
                                 ctx.clearRect(0, 0, canvas.width, canvas.height); 
                                 document.getElementById('output_b64').style.display = 'none';
@@ -575,7 +634,7 @@ else:
 
 
     # ==========================================
-    # 3. INTERFACCIA COLLABORATORE (SEPARATA NETTAMENTE)
+    # 3. INTERFACCIA COLLABORATORE
     # ==========================================
     elif st.session_state.ruolo_utente == "collaboratore":
         tipo_corrente = st.session_state.tipo_istanza_collaboratore
@@ -603,7 +662,14 @@ else:
                         st.error("❌ Compila tutti i campi obbligatori.")
                     else:
                         with st.spinner("Invio e notifica email in corso..."):
+                            df_registro = scarica_da_sheet("Richieste_Preside")
+                            
+                            # Calcolo di un ID numerico univoco incrementale per la richiesta
+                            id_req_num = pd.to_numeric(df_registro["id_richiesta"], errors='coerce')
+                            nuovo_id_richiesta = int(id_req_num.max()) + 1 if not id_req_num.dropna().empty else 101
+                            
                             nuova_richiesta_df = pd.DataFrame([{
+                                "id_richiesta": nuovo_id_richiesta,
                                 "data_richiesta": datetime.now().strftime("%d/%m/%Y %H:%M"),
                                 "richiedente": st.session_state.utente_corrente,
                                 "tipo_istanza": "Comodato d'Uso",
@@ -612,13 +678,13 @@ else:
                                 "motivazione": motivazione_richiesta.strip(),
                                 "stato": "In attesa di approvazione"
                             }])
-                            df_registro = scarica_da_sheet("Richieste_Preside")
+                            
                             carica_su_sheet(pd.concat([df_registro, nuova_richiesta_df], ignore_index=True), "Richieste_Preside")
                             
-                            # Invio email reale all'indirizzo di testing
-                            invia_notifica_email(st.session_state.utente_corrente, "Comodato d'Uso", oggetto_richiesta.strip(), motivazione_richiesta.strip())
+                            # Invio email reale in HTML con i due pulsanti interattivi passandogli l'ID univoco
+                            invia_notifica_email(nuovo_id_richiesta, st.session_state.utente_corrente, "Comodato d'Uso", oggetto_richiesta.strip(), motivazione_richiesta.strip())
                             
-                            st.success(f"🎉 Richiesta di comodato inoltrata alla Preside e notificata a {EMAIL_TESTING}!")
+                            st.success(f"🎉 Richiesta di comodato inoltrata alla Preside e notificata con pulsanti rapidi a {EMAIL_TESTING}!")
                             
         elif tipo_corrente == "Materiale":
             st.markdown("## 📦 Modulo B: Richiesta Materiale Logistico / Consumo")
@@ -643,7 +709,13 @@ else:
                         st.error("❌ Compila tutti i campi obbligatori per la fornitura.")
                     else:
                         with st.spinner("Invio e notifica email in corso..."):
+                            df_registro = scarica_da_sheet("Richieste_Preside")
+                            
+                            id_req_num = pd.to_numeric(df_registro["id_richiesta"], errors='coerce')
+                            nuovo_id_richiesta = int(id_req_num.max()) + 1 if not id_req_num.dropna().empty else 101
+                            
                             nuova_richiesta_df = pd.DataFrame([{
+                                "id_richiesta": nuovo_id_richiesta,
                                 "data_richiesta": datetime.now().strftime("%d/%m/%Y %H:%M"),
                                 "richiedente": st.session_state.utente_corrente,
                                 "tipo_istanza": "Fornitura Materiale",
@@ -652,10 +724,10 @@ else:
                                 "motivazione": motivazione_richiesta.strip(),
                                 "stato": "In attesa di approvazione"
                             }])
-                            df_registro = scarica_da_sheet("Richieste_Preside")
+                            
                             carica_su_sheet(pd.concat([df_registro, nuova_richiesta_df], ignore_index=True), "Richieste_Preside")
                             
-                            # Invio email reale all'indirizzo di testing
-                            invia_notifica_email(st.session_state.utente_corrente, "Fornitura Materiale", oggetto_richiesta.strip(), motivazione_richiesta.strip())
+                            # Invio email in HTML con i pulsanti interattivi
+                            invia_notifica_email(nuovo_id_richiesta, st.session_state.utente_corrente, "Fornitura Materiale", oggetto_richiesta.strip(), motivazione_richiesta.strip())
                             
-                            st.success(f"🎉 Richiesta materiale registrata e notificata con successo a {EMAIL_TESTING}!")
+                            st.success(f"🎉 Richiesta materiale registrata e notificata con pulsanti rapidi a {EMAIL_TESTING}!")
