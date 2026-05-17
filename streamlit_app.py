@@ -4,7 +4,6 @@ from datetime import datetime
 import io
 import base64
 from PIL import Image
-import requests
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -77,10 +76,9 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- FUNZIONE FUNZIONALE INVIO EMAIL DIRETTO DA SMTP SECRETS ---
+# --- FUNZIONE AUTOMATICA INVIO EMAIL DIRETTO DA SMTP SECRETS ---
 def invia_mail_approvazione_diretta(id_ist, richiedente, ruolo, bene, motivazione, token_sicurezza):
     try:
-        # Recupero parametri dai secrets di Streamlit
         smtp_server = st.secrets["smtp"]["server"]
         smtp_port = int(st.secrets["smtp"]["port"])
         smtp_user = st.secrets["smtp"]["user"]
@@ -120,7 +118,6 @@ def invia_mail_approvazione_diretta(id_ist, richiedente, ruolo, bene, motivazion
         """
         msg.attach(MIMEText(html, "html"))
         
-        # Connessione sicura TLS
         server = smtplib.SMTP(smtp_server, smtp_port)
         server.starttls()
         server.login(smtp_user, smtp_password)
@@ -431,7 +428,7 @@ else:
     st.image(URL_LOGO, use_container_width=True)
 
     # ==========================================
-    # WORKFLOW A: AREA COLLABORATORI (PULITA, NO LINK)
+    # WORKFLOW 1: INTERFACCIA COLLABORATORI (BLINDATA)
     # ==========================================
     if st.session_state.ruolo_utente == "collaboratore":
         st.markdown(f"### Benvenuto Area Risorse, {st.session_state.utente_corrente}")
@@ -471,7 +468,7 @@ else:
                             }])
                             carica_su_sheet(pd.concat([df_ist_c, nuova_istanza], ignore_index=True), "Istanze_Comodati")
                             
-                            # Invio email diretto via SMTP interno (Configurato nei Secrets)
+                            # Invio email diretto via SMTP interno
                             invio_ok = invia_mail_approvazione_diretta(
                                 id_ist, st.session_state.utente_corrente, t_sog, cat_bene, mot_bene.strip(), token_sicurezza
                             )
@@ -510,7 +507,7 @@ else:
                         st.error("Inserisci l'articolo prima di procedere.")
 
     # ==========================================
-    # WORKFLOW B: AMMINISTRAZIONE / DIRIGENTE (ADMIN)
+    # WORKFLOW 2: AMMINISTRAZIONE / DIRIGENTE (ADMIN)
     # ==========================================
     elif st.session_state.ruolo_utente == "admin":
         tab_istanze, tab_comodati_reg, tab_giacenze_totali = st.tabs(["📩 ISTANZE COMODATI", "📜 REGISTRO ASSEGNAZIONI", "🏢 GIACENZE"])
@@ -537,7 +534,7 @@ else:
                 st.dataframe(scarica_da_sheet(MAPPA_SCHEDE[m]["inventario"]), use_container_width=True, hide_index=True)
 
     # ==========================================
-    # WORKFLOW C: TECNICI INFORMATICI
+    # WORKFLOW 3: TECNICI INFORMATICI (COMODATI REALI)
     # ==========================================
     elif st.session_state.ruolo_utente == "magazziniere" and st.session_state.magazzino_selezionato == "Tecnici Informatici":
         tab_ist, tab_cons, tab_ric, tab_inv, tab_reg = st.tabs(["📥 Istanze", "✍️ Consegna", "↩️ Riconsegne", "📋 Inventario", "📜 Registro"])
@@ -557,22 +554,34 @@ else:
                 with st.form("p_consegna"):
                     sog_sel = st.selectbox("Assegnatario:", ist_pronte)
                     riga = df_istanze[df_istanze["nominativo"] == sog_sel].iloc[0]
-                    beni_disp = df_inv_c[df_inv_c["stato"] == "Disponibile"]["id_bene"].tolist() if not df_inv_c.empty else []
-                    bene_sel = st.selectbox("Seriale dispositivo:", beni_disp if beni_disp else ["Nessuno"])
+                    
+                    # Logica selettiva per beni fisici o chiavi
+                    if riga['categoria_bene'] in ["PC Notebook", "Chiave d'Accesso"]:
+                        beni_disp = df_inv_c[df_inv_c["stato"] == "Disponibile"]["id_bene"].tolist() if not df_inv_c.empty else []
+                        bene_sel = st.selectbox("Seriale dispositivo:", beni_disp if beni_disp else ["Nessuno"])
+                    else:
+                        bene_sel = st.text_input("Inserisci Identificativo/Codice Libero:", "GENERICO-01")
+                        
                     st.components.v1.html(rendering_pad_firma_html("canvas_c"), height=260)
                     cod_f = st.text_area("Incolla codice firma qui:")
+                    
                     if st.form_submit_button("Emetti Verbale Ufficiale"):
                         if cod_f.strip() and bene_sel != "Nessuno":
                             next_id = int(df_reg_c["id_comodato"].astype(float).max()) + 1 if not df_reg_c.empty else 5001
                             ora = datetime.now().strftime("%d/%m/%Y %H:%M")
                             pdf = genera_pdf_comodato(next_id, riga['nominativo'], riga['tipo_soggetto'], bene_sel, ora, "CONSEGNA", cod_f.strip(), st.session_state.utente_corrente)
+                            
                             if carica_su_drive_unico(pdf, f"Consegna_{next_id}.pdf", "application/pdf", "Comodati_Consegne"):
                                 df_istanze.loc[df_istanze["id_istanza"] == riga["id_istanza"], "stato"] = "Evasa"
                                 carica_su_sheet(df_istanze, "Istanze_Comodati")
+                                
                                 n_c = pd.DataFrame([{"id_comodato": next_id, "tipo_soggetto": riga['tipo_soggetto'], "nominativo": riga['nominativo'], "id_bene": bene_sel, "data_consegna": ora, "stato_comodato": "In Corso"}])
                                 carica_su_sheet(pd.concat([df_reg_c, n_c], ignore_index=True), "Registro_Comodati")
-                                df_inv_c.loc[df_inv_c["id_bene"] == bene_sel, "stato"] = "Assegnato"
-                                carica_su_sheet(df_inv_c, "Inventario_Comodati")
+                                
+                                if riga['categoria_bene'] in ["PC Notebook", "Chiave d'Accesso"]:
+                                    df_inv_c.loc[df_inv_c["id_bene"] == bene_sel, "stato"] = "Assegnato"
+                                    carica_su_sheet(df_inv_c, "Inventario_Comodati")
+                                    
                                 st.success("Documento emesso e caricato su Drive!")
                                 st.rerun()
         with tab_ric:
@@ -581,19 +590,23 @@ else:
             else:
                 for idx, r in c_attivi.iterrows():
                     with st.container(border=True):
-                        st.markdown(f"📋 Contratto: {r['id_comodato']} - Assegnatario: {r['nominativo']}")
+                        st.markdown(f"📋 Contratto: {r['id_comodato']} - Assegnatario: {r['nominativo']} (Bene: {r['id_bene']})")
                         if st.button("Scarica Restituzione", key=f"ric_{idx}"):
                             df_reg_c.loc[idx, "stato_comodato"] = "Riconsegnato"
                             carica_su_sheet(df_reg_c, "Registro_Comodati")
-                            df_inv_c.loc[df_inv_c["id_bene"] == r["id_bene"], "stato"] = "Disponibile"
-                            carica_su_sheet(df_inv_c, "Inventario_Comodati")
+                            
+                            # Libera il bene nell'inventario solo se presente
+                            if not df_inv_c.empty and r["id_bene"] in df_inv_c["id_bene"].astype(str).values:
+                                df_inv_c.loc[df_inv_c["id_bene"] == r["id_bene"], "stato"] = "Disponibile"
+                                carica_su_sheet(df_inv_c, "Inventario_Comodati")
+                                
                             st.success("Riconsegna archiviata correttamente!")
                             st.rerun()
         with tab_inv: st.dataframe(df_inv_c, use_container_width=True, hide_index=True)
         with tab_reg: st.dataframe(df_reg_c, use_container_width=True, hide_index=True)
 
     # ==========================================
-    # WORKFLOW D: MAGAZZINI STANDARD (ATA / OFFICINA)
+    # WORKFLOW 4: MAGAZZINI STANDARD (ATA / OFFICINA)
     # ==========================================
     elif st.session_state.ruolo_utente == "magazziniere":
         st.markdown(f"## 📦 Magazzino: {st.session_state.magazzino_selezionato}")
@@ -613,4 +626,4 @@ else:
                         if st.button("Evadi Ordine ✅", key=f"ev_{idx}"):
                             df_req.loc[idx, "stato"] = "Evaso"
                             carica_su_sheet(df_req, MAPPA_SCHEDE[st.session_state.magazzino_selezionato]["richieste"])
-                            st.rerun()
+                            st.rerun()s
