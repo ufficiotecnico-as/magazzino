@@ -329,244 +329,294 @@ else:
             
     st.image(URL_LOGO, use_container_width=True)
 
-    # --- ACCESSO AMMINISTRATORE ---
-    if st.session_state.ruolo_utente == "admin":
-        tab_magazzini, tab_comodati = st.tabs(["📊 MAGAZZINI LOGISTICI", "✍️ GESTIONE COMODATI (PC & CHIAVI)"])
+    # --- ACCESSO INTERFACCIA STAFF MAGAZZINIERI / ADMIN PER TICKET ---
+    if st.session_state.ruolo_utente in ["magazziniere", "admin"]:
         
-        with tab_magazzini:
-            mag_sel = st.selectbox("Seleziona Magazzino:", LISTA_MAGAZZINI)
-            st.dataframe(scarica_da_sheet(MAPPA_SCHEDE[mag_sel]["inventario"]), use_container_width=True, hide_index=True)
+        # Se l'utente è l'Admin generale, mostriamo tutti i tab inclusa la Gestione Comodati
+        if st.session_state.ruolo_utente == "admin":
+            tab_magazzini, tab_comodati = st.tabs(["📊 MAGAZZINI LOGISTICI", "✍️ GESTIONE COMODATI (PC & CHIAVI)"])
             
-        with tab_comodati:
-            df_inv_comodati = scarica_da_sheet("Inventario_Comodati")
-            df_reg_comodati = scarica_da_sheet("Registro_Comodati")
+            with tab_magazzini:
+                mag_sel = st.selectbox("Seleziona Magazzino da visualizzare:", LISTA_MAGAZZINI)
+                
+                df_inv = scarica_da_sheet(MAPPA_SCHEDE[mag_sel]["inventario"])
+                df_req = scarica_da_sheet(MAPPA_SCHEDE[mag_sel]["richieste"])
+                
+                sub_inv, sub_lav, sub_completate = st.tabs(["📦 Inventario Articoli", "⏳ Richieste in Lavorazione", "✅ Richieste Evase/Rifiutate"])
+                
+                with sub_inv:
+                    st.markdown(f"### Inventario Attuale - {mag_sel}")
+                    st.dataframe(df_inv, use_container_width=True, hide_index=True)
+                    
+                    with st.expander("➕ Aggiungi / Modifica Articolo Inventario"):
+                        with st.form(f"form_inv_{mag_sel}"):
+                            id_art = st.text_input("ID Articolo (es. ART-001)")
+                            nome_art = st.text_input("Nome Articolo")
+                            qta_art = st.number_input("Quantità", min_value=0, step=1)
+                            if st.form_submit_button("Salva in Inventario"):
+                                if id_art.strip() and nome_art.strip():
+                                    if not df_inv.empty and id_art.strip() in df_inv['id'].astype(str).values:
+                                        df_inv.loc[df_inv['id'].astype(str) == id_art.strip(), 'elemento'] = nome_art.strip()
+                                        df_inv.loc[df_inv['id'].astype(str) == id_art.strip(), 'valore'] = str(qta_art)
+                                    else:
+                                        nuovo_dati = pd.DataFrame([{"id": id_art.strip(), "elemento": nome_art.strip(), "valore": str(qta_art)}])
+                                        df_inv = pd.concat([df_inv, nuovo_dati], ignore_index=True)
+                                    carica_su_sheet(df_inv, MAPPA_SCHEDE[mag_sel]["inventario"])
+                                    st.success("Inventario aggiornato!")
+                                    st.rerun()
+                                    
+                with sub_lav:
+                    st.markdown("### Richieste in Attesa di Gestione")
+                    in_corso = df_req[df_req["stato"].isin(["In Lavorazione", "Nuovo", "In attesa"])] if not df_req.empty else pd.DataFrame()
+                    if in_corso.empty:
+                        st.info("Nessuna richiesta in lavorazione al momento.")
+                    else:
+                        for idx, riga in in_corso.iterrows():
+                            with st.container(border=True):
+                                col_r1, col_r2 = st.columns([3, 1])
+                                with col_r1:
+                                    st.markdown(f"👤 Richiedente: **{riga.get('richiedente', 'Anonimo')}** | Articolo: **{riga.get('articolo', 'N/D')}**")
+                                    st.caption(f"Data: {riga.get('data', 'N/D')} | Quantità ordinata: {riga.get('quantita', '1')} | Note: {riga.get('note', '')}")
+                                with col_r2:
+                                    c_approva, c_rifiuta = st.columns(2)
+                                    if c_approva.button("Approvata ✅", key=f"app_{mag_sel}_{idx}"):
+                                        df_req.loc[idx, "stato"] = "Approvata"
+                                        carica_su_sheet(df_req, MAPPA_SCHEDE[mag_sel]["richieste"])
+                                        st.rerun()
+                                    if c_rifiuta.button("Rifiuta ❌", key=f"rif_{mag_sel}_{idx}"):
+                                        df_req.loc[idx, "stato"] = "Rifiutata"
+                                        carica_su_sheet(df_req, MAPPA_SCHEDE[mag_sel]["richieste"])
+                                        st.rerun()
+                                        
+                with sub_completate:
+                    st.markdown("### Storico Richieste Concluse")
+                    concluse = df_req[~df_req["stato"].isin(["In Lavorazione", "Nuovo", "In attesa"])] if not df_req.empty else pd.DataFrame()
+                    st.dataframe(concluse, use_container_width=True, hide_index=True)
             
-            sub_inv, sub_nuovo, sub_registro = st.tabs(["📋 Inventario", "➕ Nuova Assegnazione", "📜 Contratti Attivi"])
+            with tab_comodati:
+                df_inv_comodati = scarica_da_sheet("Inventario_Comodati")
+                df_reg_comodati = scarica_da_sheet("Registro_Comodati")
+                
+                sub_inv_c, sub_nuovo_c, sub_registro_c = st.tabs(["📋 Inventario Beni", "➕ Nuova Assegnazione", "📜 Contratti Attivi"])
+                
+                with sub_inv_c:
+                    with st.form("nuovo_ogg"):
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            id_b = st.text_input("ID Seriale (es. PC-012)")
+                            tipo_b = st.selectbox("Categoria:", ["PC Notebook", "Chiave d'Accesso"])
+                        with col2: desc_b = st.text_input("Descrizione")
+                        if st.form_submit_button("Aggiungi all'Inventario Comodati", use_container_width=True):
+                            if id_b.strip() and desc_b.strip():
+                                nuovo_b = pd.DataFrame([{"id_bene": id_b.strip(), "tipo_bene": tipo_b, "descrizione": desc_b.strip(), "stato": "Disponibile"}])
+                                df_inv_comodati = pd.concat([df_inv_comodati, nuovo_b], ignore_index=True)
+                                carica_su_sheet(df_inv_comodati, "Inventario_Comodati")
+                                st.success("Bene inserito nell'inventario dei comodati!")
+                                st.rerun()
+                    st.dataframe(df_inv_comodati, use_container_width=True, hide_index=True)
+                    
+                with sub_nuovo_c:
+                    st.markdown("### Nuovo Accordo di Comodato")
+                    if df_inv_comodati.empty or not (df_inv_comodati["stato"] == "Disponibile").any():
+                        st.warning("Nessun bene disponibile al momento.")
+                    else:
+                        col_n1, col_n2 = st.columns(2)
+                        with col_n1:
+                            tipo_sog = st.selectbox("Profilo Richiedente:", ["Alunno", "Genitore / Tutore", "Insegnante / Personale"])
+                            nom_sog = st.text_input("Nome e Cognome dell'Assegnatario:")
+                        with col_n2:
+                            disp = df_inv_comodati[df_inv_comodati["stato"] == "Disponibile"]["id_bene"].tolist()
+                            bene_sel = st.selectbox("Seleziona l'oggetto da consegnare:", disp)
+                            
+                        st.markdown("<div style='background-color:#fff3cd; padding:12px; border-radius:8px; border:1px solid #ffeeba; font-size:13px;'><b>Clausola di Custodia:</b> Il firmatario prende in carico l'oggetto integro e si impegna a custodirlo responsabilmente.</div>", unsafe_allow_html=True)
+                        st.markdown("#### 🖊️ Acquisizione Firma Digitale (Consegna):")
+                        
+                        # Componente di ricezione Streamlit nativo per la firma
+                        firma_base64_consegna = st.components.v1.html(html_code="""
+                        <div style="background: #ffffff; border: 2px dashed #cbd5e1; padding: 10px; border-radius: 8px; max-width:470px;">
+                            <canvas id="canvas_consegna" width="450" height="150" style="border:1px solid #64748b; background:#ffffff; cursor:crosshair; touch-action: none; border-radius:4px;"></canvas>
+                            <div style="margin-top:8px; text-align: right;">
+                                <button type="button" onclick="pulisciConsegna()" style="padding:6px 12px; background:#ef4444; color:white; border:none; border-radius:4px; cursor:pointer; font-weight:bold;">Cancella</button>
+                            </div>
+                        </div>
+                        <script>
+                            var canvas = document.getElementById('canvas_consegna');
+                            var ctx = canvas.getContext('2d');
+                            ctx.strokeStyle = '#000000'; ctx.lineWidth = 3; ctx.lineCap = 'round';
+                            var isDrawing = false;
+                            function getCoord(e) {
+                                var rect = canvas.getBoundingClientRect();
+                                if(e.touches && e.touches.length > 0) return { x: e.touches[0].clientX - rect.left, y: e.touches[0].clientY - rect.top };
+                                return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+                            }
+                            function inviaAStreamlit() {
+                                var dataUrl = canvas.toDataURL('image/png');
+                                window.parent.postMessage({type: 'streamlit:setComponentValue', value: dataUrl}, '*');
+                            }
+                            canvas.addEventListener('mousedown', function(e) { isDrawing = true; var p = getCoord(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); });
+                            canvas.addEventListener('mousemove', function(e) { if(!isDrawing) return; var p = getCoord(e); ctx.lineTo(p.x, p.y); ctx.stroke(); });
+                            canvas.addEventListener('mouseup', function() { isDrawing = false; inviaAStreamlit(); });
+                            canvas.addEventListener('touchstart', function(e) { isDrawing = true; var p = getCoord(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); e.preventDefault(); }, {passive: false});
+                            canvas.addEventListener('touchmove', function(e) { if(!isDrawing) return; var p = getCoord(e); ctx.lineTo(p.x, p.y); ctx.stroke(); e.preventDefault(); }, {passive: false});
+                            canvas.addEventListener('touchend', function() { isDrawing = false; inviaAStreamlit(); });
+                            function pulisciConsegna() { ctx.clearRect(0, 0, canvas.width, canvas.height); window.parent.postMessage({type: 'streamlit:setComponentValue', value: ''}, '*'); }
+                        </script>
+                        """, height=210, key="pad_consegna_nuova")
+
+                        if st.button("🚀 Approva, Genera Verbale e Salva PDF su Google Drive", type="primary", use_container_width=True):
+                            nome_pulito = nom_sog.strip()
+                            if not nome_pulito:
+                                st.error("Errore: Compila il campo 'Nome e Cognome dell'Assegnatario'.")
+                            elif not signature_consegna_data := st.session_state.get("pad_consegna_nuova"):
+                                st.error("⚠️ Attenzione: Firma mancante. Disegna la firma nel riquadro prima di salvare.")
+                            else:
+                                with st.spinner("Generazione del documento..."):
+                                    id_com = int(df_reg_comodati["id_comodato"].astype(float).max()) + 1 if not df_reg_comodati.empty else 1001
+                                    data_ora = datetime.now().strftime("%d/%m/%Y %H:%M")
+                                    
+                                    pdf_output_bytes = genera_pdf_comodato(id_com, nome_pulito, tipo_sog, bene_sel, data_ora, "CONSEGNA", signature_consegna_data, st.session_state.utente_corrente)
+                                    nome_file_pdf = f"Verbale_Consegna_{id_com}_{nome_pulito.replace(' ', '_')}.pdf"
+                                    
+                                    if carica_su_drive_unico(pdf_output_bytes, nome_file_pdf, "application/pdf", "Comodati_Consegne"):
+                                        nuova_r = pd.DataFrame([{"id_comodato": id_com, "tipo_soggetto": tipo_sog, "nominativo": nome_pulito, "id_bene": bene_sel, "data_consegna": data_ora, "stato_comodato": "In Corso"}])
+                                        df_reg_comodati = pd.concat([df_reg_comodati, nuova_r], ignore_index=True)
+                                        carica_su_sheet(df_reg_comodati, "Registro_Comodati")
+                                        
+                                        df_inv_comodati.loc[df_inv_comodati["id_bene"] == bene_sel, "stato"] = "Assegnato"
+                                        carica_su_sheet(df_inv_comodati, "Inventario_Comodati")
+                                        
+                                        st.success(f"🎉 Contratto N°{id_com} registrato con successo!")
+                                        st.rerun()
+                                    else:
+                                        st.error("Errore d'archiviazione su Google Drive.")
+                                
+                with sub_registro_c:
+                    st.markdown("### Registro Contratti Attivi / In Corso")
+                    attivi = df_reg_comodati[df_reg_comodati["stato_comodato"] == "In Corso"] if not df_reg_comodati.empty else pd.DataFrame()
+                    
+                    if attivi.empty: 
+                        st.info("Nessun comodato attivo.")
+                    else:
+                        for id_x, riga in attivi.iterrows():
+                            with st.container(border=True):
+                                col_info, col_azione = st.columns([2.5, 1.5])
+                                with col_info:
+                                    st.markdown(f"💻 Dispositivo: **{riga['id_bene']}** affidato a **{riga['nominativo']}** ({riga['tipo_soggetto']})")
+                                    st.caption(f"Assegnato il: {riga['data_consegna']} | ID Contratto: {riga['id_comodato']}")
+                                with col_azione:
+                                    with st.expander("Esegui Riconsegna / Scarico ↩"):
+                                        st.markdown("**✍️ Firma per la Riconsegna:**")
+                                        
+                                        html_pad_ric = f"""
+                                        <div style="background: #ffffff; border: 2px dashed #cbd5e1; padding: 10px; border-radius: 8px; max-width:320px;">
+                                            <canvas id="canvas_ric_{riga['id_comodato']}" width="300" height="120" style="border:1px solid #64748b; background:#ffffff; cursor:crosshair; touch-action: none; border-radius:4px;"></canvas>
+                                            <div style="margin-top:5px; text-align: right;">
+                                                <button type="button" onclick="pulisciRic_{riga['id_comodato']}()" style="padding:4px 10px; background:#ef4444; color:white; border:none; border-radius:4px; cursor:pointer; font-size:11px; font-weight:bold;">Cancella</button>
+                                            </div>
+                                        </div>
+                                        <script>
+                                            var canvas = document.getElementById("canvas_ric_{riga['id_comodato']}");
+                                            var ctx = canvas.getContext('2d');
+                                            ctx.strokeStyle = '#8b1e1e'; ctx.lineWidth = 3; ctx.lineCap = 'round';
+                                            var isDrawing = false;
+                                            function getCoord(e) {{
+                                                var rect = canvas.getBoundingClientRect();
+                                                if(e.touches && e.touches.length > 0) return {{ x: e.touches[0].clientX - rect.left, y: e.touches[0].clientY - rect.top }};
+                                                return {{ x: e.clientX - rect.left, y: e.clientY - rect.top }};
+                                            }}
+                                            function inviaAStreamlit() {{
+                                                var dataUrl = canvas.toDataURL('image/png');
+                                                window.parent.postMessage({{type: 'streamlit:setComponentValue', value: dataUrl}}, '*');
+                                            }}
+                                            canvas.addEventListener('mousedown', function(e) {{ isDrawing = true; var p = getCoord(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); }});
+                                            canvas.addEventListener('mousemove', function(e) {{ if(!isDrawing) return; var p = getCoord(e); ctx.lineTo(p.x, p.y); ctx.stroke(); }});
+                                            canvas.addEventListener('mouseup', function() {{ isDrawing = false; inviaAStreamlit(); }});
+                                            canvas.addEventListener('touchstart', function(e) {{ isDrawing = true; var p = getCoord(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); e.preventDefault(); }}, {{passive: false}});
+                                            canvas.addEventListener('touchmove', function(e) {{ if(!isDrawing) return; var p = getCoord(e); ctx.lineTo(p.x, p.y); ctx.stroke(); e.preventDefault(); }}, {{passive: false}});
+                                            canvas.addEventListener('touchend', function() {{ isDrawing = false; inviaAStreamlit(); }});
+                                            function pulisciRic_{riga['id_comodato']}() {{ ctx.clearRect(0, 0, canvas.width, canvas.height); window.parent.postMessage({{type: 'streamlit:setComponentValue', value: ''}}, '*'); }}
+                                        </script>
+                                        """
+                                        firma_base64_ric = st.components.v1.html(html_pad_ric, height=180, key=f"pad_ric_{riga['id_comodato']}")
+                                            
+                                        if st.button("Conferma Rientro e Archivia ↩", key=f"btn_ric_{riga['id_comodato']}", type="primary", use_container_width=True):
+                                            signature_ric_data = st.session_state.get(f"pad_ric_{riga['id_comodato']}")
+                                            if not signature_ric_data:
+                                                st.error("⚠️ La firma di riconsegna è obbligatoria per chiudere la pratica.")
+                                            else:
+                                                with st.spinner("Salvataggio e chiusura contratto..."):
+                                                    data_rientro = datetime.now().strftime("%d/%m/%Y %H:%M")
+                                                    pdf_rientro_bytes = genera_pdf_comodato(riga['id_comodato'], riga['nominativo'], riga['tipo_soggetto'], riga['id_bene'], data_rientro, "RICONSEGNA", signature_ric_data, utente_loggato=st.session_state.utente_corrente)
+                                                    nome_file_ric = f"Ricevuta_Riconsegna_{riga['id_comodato']}_{riga['nominativo'].replace(' ', '_')}.pdf"
+                                                    
+                                                    if carica_su_drive_unico(pdf_rientro_bytes, nome_file_ric, "application/pdf", "Comodati_Riconsegne"):
+                                                        df_reg_comodati.loc[df_reg_comodati["id_comodato"].astype(str) == str(riga["id_comodato"]), "stato_comodato"] = f"Riconsegnato il {data_rientro}"
+                                                        carica_su_sheet(df_reg_comodati, "Registro_Comodati")
+                                                        
+                                                        df_inv_comodati.loc[df_inv_comodati["id_bene"] == riga["id_bene"], "stato"] = "Disponibile"
+                                                        carica_su_sheet(df_inv_comodati, "Inventario_Comodati")
+                                                        
+                                                        st.success("✅ Dispositivo rientrato a magazzino!")
+                                                        st.rerun()
+                                                    else:
+                                                        st.error("Errore nell'invio del PDF su Google Drive.")
+                                                        
+        # Interfaccia Magazziniere Singolo
+        else:
+            mag_sel = st.session_state.magazzino_selezionato
+            st.markdown(f"## Console di Gestione Logistica - {mag_sel}")
+            
+            df_inv = scarica_da_sheet(MAPPA_SCHEDE[mag_sel]["inventario"])
+            df_req = scarica_da_sheet(MAPPA_SCHEDE[mag_sel]["richieste"])
+            
+            sub_inv, sub_lav, sub_completate = st.tabs(["📦 Inventario Articoli", "⏳ Richieste in Lavorazione", "✅ Richieste Evase/Rifiutate"])
             
             with sub_inv:
-                with st.form("nuovo_ogg"):
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        id_b = st.text_input("ID Seriale (es. PC-012)")
-                        tipo_b = st.selectbox("Categoria:", ["PC Notebook", "Chiave d'Accesso"])
-                    with col2: desc_b = st.text_input("Descrizione")
-                    if st.form_submit_button("Aggiungi all'Inventario", use_container_width=True):
-                        if id_b.strip() and desc_b.strip():
-                            nuovo_b = pd.DataFrame([{"id_bene": id_b.strip(), "tipo_bene": tipo_b, "descrizione": desc_b.strip(), "stato": "Disponibile"}])
-                            df_inv_comodati = pd.concat([df_inv_comodati, nuovo_b], ignore_index=True)
-                            carica_su_sheet(df_inv_comodati, "Inventario_Comodati")
-                            st.success("Bene inserito!")
-                            st.rerun()
-                st.dataframe(df_inv_comodati, use_container_width=True, hide_index=True)
-                
-            with sub_nuovo:
-                st.markdown("### Nuovo Accordo di Comodato")
-                if df_inv_comodati.empty or not (df_inv_comodati["stato"] == "Disponibile").any():
-                    st.warning("Nessun bene disponibile al momento.")
+                st.dataframe(df_inv, use_container_width=True, hide_index=True)
+            with sub_lav:
+                in_corso = df_req[df_req["stato"].isin(["In Lavorazione", "Nuovo", "In attesa"])] if not df_req.empty else pd.DataFrame()
+                if in_corso.empty:
+                    st.info("Nessuna richiesta in attesa.")
                 else:
-                    col_n1, col_n2 = st.columns(2)
-                    with col_n1:
-                        tipo_sog = st.selectbox("Profilo Richiedente:", ["Alunno", "Genitore / Tutore", "Insegnante / Personale"])
-                        nom_sog = st.text_input("Nome e Cognome dell'Assegnatario:")
-                    with col_n2:
-                        disp = df_inv_comodati[df_inv_comodati["stato"] == "Disponibile"]["id_bene"].tolist()
-                        bene_sel = st.selectbox("Seleziona l'oggetto da consegnare:", disp)
-                        
-                    st.markdown("<div style='background-color:#fff3cd; padding:12px; border-radius:8px; border:1px solid #ffeeba; font-size:13px;'><b>Clausola di Custodia:</b> Il firmatario prende in carico l'oggetto integro e si impegna a custodirlo responsabilmente.</div>", unsafe_allow_html=True)
-                    
-                    st.markdown("#### 🖊️ Acquisizione Firma Digitale (Consegna):")
-                    
-                    # Interfaccia di input ufficiale che riceve la firma dal canvas HTML5 tramite DOM
-                    firma_base64_consegna = st.text_input("Dati Firma di Consegna (Generati Automaticamente)", key="input_firma_consegna", type="password", help="Firma all'interno del riquadro tratteggiato qui sotto")
-                    
-                    html_pad_consegna = """
-                    <div style="background: #ffffff; border: 2px dashed #cbd5e1; padding: 10px; border-radius: 8px; max-width:470px;">
-                        <canvas id="canvas_consegna" width="450" height="150" style="border:1px solid #64748b; background:#ffffff; cursor:crosshair; touch-action: none; border-radius:4px;"></canvas>
-                        <div style="margin-top:8px; text-align: right;">
-                            <button type="button" onclick="pulisciConsegna()" style="padding:6px 12px; background:#ef4444; color:white; border:none; border-radius:4px; cursor:pointer; font-weight:bold;">Cancella</button>
-                        </div>
-                    </div>
-
-                    <script>
-                        var canvas = document.getElementById('canvas_consegna');
-                        var ctx = canvas.getContext('2d');
-                        ctx.strokeStyle = '#000000';
-                        ctx.lineWidth = 3;
-                        ctx.lineCap = 'round';
-                        var isDrawing = false;
-
-                        function getCoord(e) {
-                            var rect = canvas.getBoundingClientRect();
-                            if(e.touches && e.touches.length > 0) {
-                                return { x: e.touches[0].clientX - rect.left, y: e.touches[0].clientY - rect.top };
-                            }
-                            return { x: e.clientX - rect.left, y: e.clientY - rect.top };
-                        }
-
-                        function inviaAStreamlit() {
-                            var dataUrl = canvas.toDataURL('image/png');
-                            // Trova l'elemento input di Streamlit nella pagina superiore e vi scrive i dati
-                            var inputs = window.parent.document.getElementsByTagName('input');
-                            for (var i = 0; i < inputs.length; i++) {
-                                if (inputs[i].getAttribute('aria-label') && inputs[i].getAttribute('aria-label').includes('Firma di Consegna')) {
-                                    inputs[i].value = dataUrl;
-                                    inputs[i].dispatchEvent(new Event('input', { bubbles: true }));
-                                    break;
-                                }
-                            }
-                        }
-
-                        canvas.addEventListener('mousedown', function(e) { isDrawing = true; var p = getCoord(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); });
-                        canvas.addEventListener('mousemove', function(e) { if(!isDrawing) return; var p = getCoord(e); ctx.lineTo(p.x, p.y); ctx.stroke(); });
-                        canvas.addEventListener('mouseup', function() { isDrawing = false; inviaAStreamlit(); });
-                        
-                        canvas.addEventListener('touchstart', function(e) { isDrawing = true; var p = getCoord(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); e.preventDefault(); }, {passive: false});
-                        canvas.addEventListener('touchmove', function(e) { if(!isDrawing) return; var p = getCoord(e); ctx.lineTo(p.x, p.y); ctx.stroke(); e.preventDefault(); }, {passive: false});
-                        canvas.addEventListener('touchend', function() { isDrawing = false; inviaAStreamlit(); });
-
-                        function pulisciConsegna() { 
-                            ctx.clearRect(0, 0, canvas.width, canvas.height);
-                            var inputs = window.parent.document.getElementsByTagName('input');
-                            for (var i = 0; i < inputs.length; i++) {
-                                if (inputs[i].getAttribute('aria-label') && inputs[i].getAttribute('aria-label').includes('Firma di Consegna')) {
-                                    inputs[i].value = '';
-                                    inputs[i].dispatchEvent(new Event('input', { bubbles: true }));
-                                    break;
-                                }
-                            }
-                        }
-                    </script>
-                    """
-                    st.components.v1.html(html_pad_consegna, height=210)
-
-                    if st.button("🚀 Approva, Genera Verbale e Salva PDF su Google Drive", type="primary", use_container_width=True):
-                        nome_pulito = nom_sog.strip()
-                        if not nome_pulito:
-                            st.error("Errore: Compila il campo 'Nome e Cognome dell'Assegnatario'.")
-                        elif not firma_base64_consegna or len(firma_base64_consegna) < 100:
-                            st.error("⚠️ Attenzione: Firma mancante o non rilevata. Disegna la firma nel riquadro bianco prima di salvare.")
-                        else:
-                            with st.spinner("Generazione del documento..."):
-                                id_com = int(df_reg_comodati["id_comodato"].astype(float).max()) + 1 if not df_reg_comodati.empty else 1001
-                                data_ora = datetime.now().strftime("%d/%m/%Y %H:%M")
-                                
-                                pdf_output_bytes = genera_pdf_comodato(id_com, nome_pulito, tipo_sog, bene_sel, data_ora, "CONSEGNA", firma_base64_consegna, st.session_state.utente_corrente)
-                                nome_file_pdf = f"Verbale_Consegna_{id_com}_{nome_pulito.replace(' ', '_')}.pdf"
-                                
-                                if carica_su_drive_unico(pdf_output_bytes, nome_file_pdf, "application/pdf", "Comodati_Consegne"):
-                                    nuova_r = pd.DataFrame([{"id_comodato": id_com, "tipo_soggetto": tipo_sog, "nominativo": nome_pulito, "id_bene": bene_sel, "data_consegna": data_ora, "stato_comodato": "In Corso"}])
-                                    df_reg_comodati = pd.concat([df_reg_comodati, nuova_r], ignore_index=True)
-                                    carica_su_sheet(df_reg_comodati, "Registro_Comodati")
-                                    
-                                    df_inv_comodati.loc[df_inv_comodati["id_bene"] == bene_sel, "stato"] = "Assegnato"
-                                    carica_su_sheet(df_inv_comodati, "Inventario_Comodati")
-                                    
-                                    st.success(f"🎉 Contratto N°{id_com} registrato con successo!")
-                                    st.rerun()
-                                else:
-                                    st.error("Errore d'archiviazione su Google Drive.")
-                            
-            with sub_registro:
-                st.markdown("### Registro Contratti Attivi / In Corso")
-                attivi = df_reg_comodati[df_reg_comodati["stato_comodato"] == "In Corso"] if not df_reg_comodati.empty else pd.DataFrame()
-                
-                if attivi.empty: 
-                    st.info("Nessun comodato attivo.")
-                else:
-                    for id_x, riga in attivi.iterrows():
+                    for idx, riga in in_corso.iterrows():
                         with st.container(border=True):
-                            col_info, col_azione = st.columns([2.5, 1.5])
-                            with col_info:
-                                st.markdown(f"💻 Dispositivo: **{riga['id_bene']}** affidato a **{riga['nominativo']}** ({riga['tipo_soggetto']})")
-                                st.caption(f"Assegnato il: {riga['data_consegna']} | ID Contratto: {riga['id_comodato']}")
-                            with col_azione:
-                                with st.expander("Esegui Riconsegna / Scarico ↩"):
-                                    st.markdown("**✍️ Firma per la Riconsegna:**")
-                                    
-                                    # Input text Streamlit associato univocamente al contratto corrente per raccogliere il base64
-                                    firma_base64_ric = st.text_input(f"Dati Riconsegna {riga['id_comodato']}", key=f"input_ric_{riga['id_comodato']}", type="password", help="Apponi la firma nel pad sottostante")
-                                    
-                                    html_pad_ric = f"""
-                                    <div style="background: #ffffff; border: 2px dashed #cbd5e1; padding: 10px; border-radius: 8px; max-width:320px;">
-                                        <canvas id="canvas_ric_{riga['id_comodato']}" width="300" height="120" style="border:1px solid #64748b; background:#ffffff; cursor:crosshair; touch-action: none; border-radius:4px;"></canvas>
-                                        <div style="margin-top:5px; text-align: right;">
-                                            <button type="button" onclick="pulisciRic_{riga['id_comodato']}()" style="padding:4px 10px; background:#ef4444; color:white; border:none; border-radius:4px; cursor:pointer; font-size:11px; font-weight:bold;">Cancella</button>
-                                        </div>
-                                    </div>
+                            col_r1, col_r2 = st.columns([3, 1])
+                            with col_r1:
+                                st.markdown(f"👤 **{riga.get('richiedente', 'Anonimo')}** vuole **{riga.get('articolo', 'N/D')}**")
+                                st.caption(f"Qta: {riga.get('quantita', '1')} | Note: {riga.get('note', '')}")
+                            with col_r2:
+                                if st.button("Segna come Approvata ✅", key=f"app_m_{idx}"):
+                                    df_req.loc[idx, "stato"] = "Approvata"
+                                    carica_su_sheet(df_req, MAPPA_SCHEDE[mag_sel]["richieste"])
+                                    st.rerun()
+            with sub_completate:
+                concluse = df_req[~df_req["stato"].isin(["In Lavorazione", "Nuovo", "In attesa"])] if not df_req.empty else pd.DataFrame()
+                st.dataframe(concluse, use_container_width=True, hide_index=True)
 
-                                    <script>
-                                        var canvas = document.getElementById("canvas_ric_{riga['id_comodato']}");
-                                        var ctx = canvas.getContext('2d');
-                                        ctx.strokeStyle = '#8b1e1e';
-                                        ctx.lineWidth = 3;
-                                        ctx.lineCap = 'round';
-                                        var isDrawing = false;
-
-                                        function getCoord(e) {{
-                                            var rect = canvas.getBoundingClientRect();
-                                            if(e.touches && e.touches.length > 0) {{
-                                                return {{ x: e.touches[0].clientX - rect.left, y: e.touches[0].clientY - rect.top }};
-                                            }}
-                                            return {{ x: e.clientX - rect.left, y: e.clientY - rect.top }};
-                                        }}
-
-                                        function inviaAStreamlit() {{
-                                            var dataUrl = canvas.toDataURL('image/png');
-                                            var inputs = window.parent.document.getElementsByTagName('input');
-                                            for (var i = 0; i < inputs.length; i++) {{
-                                                if (inputs[i].getAttribute('aria-label') && inputs[i].getAttribute('aria-label').includes('Dati Riconsegna {riga['id_comodato']}')) {{
-                                                    inputs[i].value = dataUrl;
-                                                    inputs[i].dispatchEvent(new Event('input', {{ bubbles: true }}));
-                                                    break;
-                                                }}
-                                            }}
-                                        }}
-
-                                        canvas.addEventListener('mousedown', function(e) {{ isDrawing = true; var p = getCoord(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); }});
-                                        canvas.addEventListener('mousemove', function(e) {{ if(!isDrawing) return; var p = getCoord(e); ctx.lineTo(p.x, p.y); ctx.stroke(); }});
-                                        canvas.addEventListener('mouseup', function() {{ isDrawing = false; inviaAStreamlit(); }});
-                                        
-                                        canvas.addEventListener('touchstart', function(e) {{ isDrawing = true; var p = getCoord(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); e.preventDefault(); }}, {{passive: false}});
-                                        canvas.addEventListener('touchmove', function(e) {{ if(!isDrawing) return; var p = getCoord(e); ctx.lineTo(p.x, p.y); ctx.stroke(); e.preventDefault(); }}, {{passive: false}});
-                                        canvas.addEventListener('touchend', function() {{ isDrawing = false; inviaAStreamlit(); }});
-
-                                        function pulisciRic_{riga['id_comodato']}() {{ 
-                                            ctx.clearRect(0, 0, canvas.width, canvas.height);
-                                            var inputs = window.parent.document.getElementsByTagName('input');
-                                            for (var i = 0; i < inputs.length; i++) {{
-                                                if (inputs[i].getAttribute('aria-label') && inputs[i].getAttribute('aria-label').includes('Dati Riconsegna {riga['id_comodato']}')) {{
-                                                    inputs[i].value = '';
-                                                    inputs[i].dispatchEvent(new Event('input', {{ bubbles: true }}));
-                                                    break;
-                                                }}
-                                            }}
-                                        }}
-                                    </script>
-                                    """
-                                    st.components.v1.html(html_pad_ric, height=180)
-                                        
-                                    if st.button("Conferma Rientro e Archivia ↩", key=f"btn_ric_{riga['id_comodato']}", type="primary", use_container_width=True):
-                                        if not firma_base64_ric or len(firma_base64_ric) < 100:
-                                            st.error("⚠️ La firma di riconsegna è obbligatoria per chiudere la pratica.")
-                                        else:
-                                            with st.spinner("Salvataggio e chiusura contratto..."):
-                                                data_rientro = datetime.now().strftime("%d/%m/%Y %H:%M")
-                                                pdf_rientro_bytes = genera_pdf_comodato(riga['id_comodato'], riga['nominativo'], riga['tipo_soggetto'], riga['id_bene'], data_rientro, "RICONSEGNA", firma_base64_ric, utente_loggato=st.session_state.utente_corrente)
-                                                nome_file_ric = f"Ricevuta_Riconsegna_{riga['id_comodato']}_{riga['nominativo'].replace(' ', '_')}.pdf"
-                                                
-                                                if carica_su_drive_unico(pdf_rientro_bytes, nome_file_ric, "application/pdf", "Comodati_Riconsegne"):
-                                                    df_reg_comodati.loc[df_reg_comodati["id_comodato"].astype(str) == str(riga["id_comodato"]), "stato_comodato"] = f"Riconsegnato il {data_rientro}"
-                                                    carica_su_sheet(df_reg_comodati, "Registro_Comodati")
-                                                    
-                                                    df_inv_comodati.loc[df_inv_comodati["id_bene"] == riga["id_bene"], "stato"] = "Disponibile"
-                                                    carica_su_sheet(df_inv_comodati, "Inventario_Comodati")
-                                                    
-                                                    st.success("✅ Dispositivo rientrato a magazzino e reso nuovamente disponibile!")
-                                                    st.rerun()
-                                                else:
-                                                    st.error("Errore nell'invio del PDF su Google Drive.")
-
-    # --- INTERFACCIA COLLABORATORI ---
+    # --- INTERFACCIA COLLABORATORI (INSERIMENTO TICKET RICHIESTE) ---
     elif st.session_state.ruolo_utente == "collaboratore":
-        st.markdown("### Nuova Richiesta Materiali")
-        st.info("Area Richieste allineata ed attiva.")
+        st.markdown(f"### Benvenuto {st.session_state.utente_corrente}")
+        st.markdown("Invia una nuova richiesta di prelievo o materiale ai diversi reparti logistici della scuola.")
+        
+        with st.form("nuova_richiesta_collab"):
+            mag_dest = st.selectbox("Seleziona il Magazzino di Destinazione:", LISTA_MAGAZZINI)
+            art_richiesto = st.text_input("Descrizione dell'articolo o materiale richiesto:")
+            qta_richiesta = st.number_input("Quantità necessaria:", min_value=1, value=1, step=1)
+            note_richiesta = st.text_area("Eventuali note o specifiche aggiuntive:")
+            
+            if st.form_submit_button("Invia Richiesta al Magazzino", use_container_width=True):
+                if art_richiesto.strip():
+                    df_dest = scarica_da_sheet(MAPPA_SCHEDE[mag_dest]["richieste"])
+                    nuovo_ticket = pd.DataFrame([{
+                        "richiedente": st.session_state.utente_corrente,
+                        "articolo": art_richiesto.strip(),
+                        "quantita": str(qta_richiesta),
+                        "data": datetime.now().strftime("%d/%m/%Y %H:%M"),
+                        "stato": "In Lavorazione",
+                        "note": note_richiesta.strip()
+                    }])
+                    df_dest = pd.concat([df_dest, nuovo_ticket], ignore_index=True)
+                    carica_su_sheet(df_dest, MAPPA_SCHEDE[mag_dest]["richieste"])
+                    st.success(f"Ticket inviato con successo al reparto {mag_dest}!")
+                else:
+                    st.error("Inserisci l'articolo prima di inviare.")
