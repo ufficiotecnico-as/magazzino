@@ -6,7 +6,6 @@ import base64
 from PIL import Image
 
 # --- CONFIGURAZIONE INTERMEDIARIO SILENZIOSO (GOOGLE APPS SCRIPT) ---
-# Inserito il tuo link personale per gestire le approvazioni in background senza passare da Streamlit
 URL_INTERMEDIARIO_SILENZIOSO = "https://script.google.com/a/macros/antonioscarpa.edu.it/s/AKfycbzD8WgECLYhKVM6TrDe4QwaFafRCWKFg9lc4YZglYclVUQA6Z2pX2h1L0J23-cqhgEr/exec"
 
 # --- CONTROLLO LIBRERIE ESTERNE ---
@@ -132,7 +131,6 @@ def carica_su_sheet(df, nome_scheda):
         worksheet.update(valori)
     except Exception: pass
 
-
 # --- FUNZIONE DI INVIO EMAIL CON PULSANTI DIRETTI AD APPS SCRIPT ---
 def invia_notifica_email(id_richiesta, roommate, tipo_istanza, oggetto, motivazione):
     try:
@@ -140,7 +138,6 @@ def invia_notifica_email(id_richiesta, roommate, tipo_istanza, oggetto, motivazi
         from email.mime.text import MIMEText
         from email.mime.multipart import MIMEMultipart
 
-        # Generiamo i link puntando unicamente a Google Script (Streamlit non viene toccato)
         url_approva = f"{URL_INTERMEDIARIO_SILENZIOSO}?action=approve&id={id_richiesta}"
         url_rifiuta = f"{URL_INTERMEDIARIO_SILENZIOSO}?action=reject&id={id_richiesta}"
 
@@ -174,7 +171,7 @@ def invia_notifica_email(id_richiesta, roommate, tipo_istanza, oggetto, motivazi
                         <span style="color: #334155; font-style: italic;">{motivazione}</span>
                     </div>
                     
-                    <h3 style="color: #0f172a; font-size: 14px; margin-bottom: 15px; text-align: center;">APPROVAZIONE NELLA MAIL (One-Click background):</h3>
+                    <h3 style="color: #0f172a; font-size: 14px; margin-bottom: 15px; text-align: center;">APPROVAZIONE RAPIDA:</h3>
                     
                     <div style="text-align: center; margin-top: 20px; display: block; margin-bottom: 20px;">
                         <a href="{url_approva}" target="_blank" style="background-color: #16a34a; color: white; padding: 12px 28px; text-decoration: none; font-weight: bold; border-radius: 8px; margin-right: 15px; display: inline-block;">🟢 AUTORIZZA RAPIDO</a>
@@ -196,7 +193,6 @@ def invia_notifica_email(id_richiesta, roommate, tipo_istanza, oggetto, motivazi
             return True
     except Exception:
         return False
-
 
 # --- CLASSE PDF MINISTERIALE ---
 class PDFMinisteriale(FPDF):
@@ -471,6 +467,7 @@ else:
                     if st.button("🚀 Salva Contratto", type="primary", use_container_width=True):
                         if nom_sog.strip() and firma_base64_finale:
                             with st.spinner("Salvataggio..."):
+                                # --- FIX CORREZIONE KEYERROR: CAMBIATO df_registro IN df_reg_comodati E id_richiesta IN id_comodato ---
                                 id_comodato_numerico = pd.to_numeric(df_reg_comodati["id_comodato"], errors='coerce')
                                 id_com = int(id_comodato_numerico.max()) + 1 if not id_comodato_numerico.dropna().empty else 1001
                                 data_ora = datetime.now().strftime("%d/%m/%Y %H:%M")
