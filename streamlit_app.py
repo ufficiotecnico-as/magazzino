@@ -54,9 +54,12 @@ URL_LOGO = "https://cspace.spaggiari.eu//pub/TVII0004/TVII0004-intestazione-nuov
 SPREADSHEET_ID = "1Q91H_TULvpsnPcyOwQ1lxmjOf809xp4cUz9p1EdMc-4"
 LISTA_MAGAZZINI = ["Personale ATA", "Officina", "Tecnici Informatici"]
 
-# Cartelle specifiche per lo smistamento richiesto
-ID_CARTELLA_CONSEGNA = "1bVTs2smvVJONs2oIAFZdDvX9pYDK9MZT"   # Cartella per i Verbali di Consegna
-ID_CARTELLA_RICONSEGNA = "1bVTs2smvVJONs2oIAFZdDvX9pYDK9MZT" # Inserisci l'ID specifico per le Riconsegne, se differente
+# ==========================================
+# 📂 ARCHIVIAZIONE COMODATI - ID CARTELLE GOOGLE DRIVE
+# ==========================================
+# Inserisci qui dentro i rispettivi ID univoci delle tue cartelle di Drive
+ID_CARTELLA_CONSEGNA = "1bVTs2smvVJONs2oIAFZdDvX9pYDK9MZT"   
+ID_CARTELLA_RICONSEGNA = "1bVTs2smvVJONs2oIAFZdDvX9pYDK9MZT" # Sostituisci se hai una cartella dedicata alle riconsegne
 
 EMAIL_PRESIDE_TEST = "marcobrunetti14@gmail.com"
 
@@ -253,7 +256,7 @@ def genera_pdf_riconsegna(id_contratto, nome, ruolo, bene, data, firma_base64=No
     pdf.set_font("Times", "B", 10)
     pdf.cell(95, 5, "", ln=False)
     
-    # Layout fedele a image_2954c4.png
+    # Layout conforme all'immagine istituzionale
     pdf.cell(85, 5, "Ai Docenti / Al Personale Interessato", ln=True)
     pdf.cell(95, 5, "", ln=False)
     pdf.cell(85, 5, f"Sig./Sigg. {nome} ({ruolo})", ln=True)
@@ -316,7 +319,7 @@ if "action" in query_params and "id" in query_params:
         if idx_lista:
             idx = idx_lista[0]
             nuovo_stato = "In lavorazione" if (azione == "approve" and df_f.at[idx, "categoria_bene"] == "PC Notebook") else ("Lavorata" if azione == "approve" else "Rifiutata")
-            df_f.at[idx, "stato"] = nuevo_stato
+            df_f.at[idx, "stato"] = nuovo_stato
             carica_su_sheet(df_f, "Richieste_Preside")
             
             if azione == "approve":
@@ -324,7 +327,7 @@ if "action" in query_params and "id" in query_params:
                 if df_f.at[idx, "categoria_bene"] != "PC Notebook":
                     invia_notifica_pronto_ritiro(id_req, df_f.at[idx, "email_utente"], df_f.at[idx, "oggetto"])
             st.success("✅ Decisione registrata e flussi aggiornati correttamente!")
-        else: st.error("Richiesta non trovato.")
+        else: st.error("Richiesta non trovata.")
     st.stop()
 
 # --- INIZIALIZZAZIONE SESSION STATE ---
@@ -450,21 +453,22 @@ else:
             if pronte.empty: st.info("Nessun materiale o dispositivo in attesa di consegna fisica.")
             else:
                 for _, riga in pronte.iterrows():
+                    # Prefisso univoco 'cons_' per evitare conflitti con la sezione riconsegna
                     with st.expander(f"📦 ID {riga['id_richiesta']} - Consegna a {riga['richiedente']} [{riga['categoria_bene']}]"):
                         st.markdown(f"**Dettagli istanza:** {riga['oggetto']} — *Nota:* {riga['motivazione']}")
                         
                         df_inv_c = scarica_da_sheet("Inventario_Comodati")
                         disp = df_inv_c[df_inv_c["stato"] == "Disponibile"]["id_bene"].tolist() if not df_inv_c.empty else []
                         
-                        with st.form(key=f"form_consegna_{riga['id_richiesta']}"):
+                        with st.form(key=f"form_consegna_id_{riga['id_richiesta']}"):
                             col1, col2 = st.columns(2)
                             with col1:
                                 if riga['categoria_bene'] in ["PC Notebook", "Chiave d'Accesso"]:
-                                    bene_assegnato = st.selectbox("Seleziona seriale fisico da assegnare:", disp, key=f"sel_{riga['id_richiesta']}")
+                                    bene_assegnato = st.selectbox("Seleziona seriale fisico da assegnare:", disp, key=f"sel_cons_{riga['id_richiesta']}")
                                 else:
-                                    bene_assegnato = st.text_input("Lotto / Quantità materiale consegnato:", value="1 Conf.", key=f"txt_{riga['id_richiesta']}")
+                                    bene_assegnato = st.text_input("Lotto / Quantità materiale consegnato:", value="1 Conf.", key=f"txt_cons_{riga['id_richiesta']}")
                             with col2:
-                                firma_b64 = st.text_area("Incolla codice Pad Firma Grafica:", key=f"f_{riga['id_richiesta']}")
+                                firma_b64 = st.text_area("Incolla codice Pad Firma Grafica:", key=f"f_cons_{riga['id_richiesta']}")
                             
                             sub_btn = st.form_submit_button("Completa Consegna e Genera Verbale", type="primary")
                             
@@ -478,20 +482,20 @@ else:
                                     data_ora = datetime.now().strftime("%d/%m/%Y %H:%M")
                                     pdf_bytes = genera_pdf_comodato(id_com, riga['richiedente'], riga['ruolo_richiedente'], bene_assegnato, data_ora, clean_firma, st.session_state.utente_corrente)
                                     
-                                    # ARCHIVIAZIONE IN "CONSEGNA"
+                                    # ARCHIVIAZIONE NELLA CARTELLA "CONSEGNA"
                                     if carica_su_drive_unico(pdf_bytes, f"Verbale_{id_com}_{riga['richiedente']}.pdf", "application/pdf", ID_CARTELLA_CONSEGNA):
                                         idx = df_istanze.index[df_istanze["id_richiesta"].astype(str) == str(riga['id_richiesta'])].tolist()[0]
                                         df_istanze.at[idx, "stato"] = "Assegnata"
                                         carica_su_sheet(df_istanze, "Richieste_Preside")
                                  
                                         nuovo_c = pd.DataFrame([{"id_comodato": id_com, "tipo_soggetto": riga['ruolo_richiedente'], "nominativo": riga['richiedente'], "id_bene": bene_assegnato, "data_consegna": data_ora, "stato_comodato": "Attivo"}])
-                                        carica_su_sheet(pd.concat([df_reg_c, nuovo_c], ignore_index=True), "Registro_Comodati")
+                                        carica_su_sheet(pd.concat([df_reg_c, nuevo_c], ignore_index=True), "Registro_Comodati")
                                         
                                         if riga['categoria_bene'] in ["PC Notebook", "Chiave d'Accesso"]:
                                             df_inv_c.loc[df_inv_c["id_bene"] == bene_assegnato, "stato"] = "Assegnato"
                                             carica_su_sheet(df_inv_c, "Inventario_Comodati")
                                             
-                                        st.success("🎉 Pratica Evasa! Archiviata correttamente nella cartella 'Consegna'.")
+                                        st.success("🎉 Pratica Evasa! Archivio aggiornato con successo.")
                                         st.rerun()
                                 else:
                                     st.error("Errore: Verificare i dati inseriti e la firma.")
@@ -506,8 +510,9 @@ else:
                 st.info("Nessun comodato attivo presente nel sistema.")
             else:
                 for _, com in comodati_attivi.iterrows():
+                    # Prefisso univoco 'ric_' per evitare sovrapposizioni e l'errore DuplicateWidgetID
                     with st.expander(f"🔄 Registro ID: {com['id_comodato']} - {com['nominativo']} (Bene: {com['id_bene']})"):
-                        with st.form(key=f"form_riconsegna_{com['id_comodato']}"):
+                        with st.form(key=f"form_riconsegna_id_{com['id_comodato']}"):
                             st.markdown(f"**Assegnatario:** {com['nominativo']} ({com['tipo_soggetto']}) — **Data Consegna:** {com['data_consegna']}")
                             firma_ric_b64 = st.text_area("Incolla codice Pad Firma Grafica per Riconsegna:", key=f"f_ric_{com['id_comodato']}")
                             
@@ -519,7 +524,7 @@ else:
                                     data_ora_ora = datetime.now().strftime("%d/%m/%Y %H:%M")
                                     pdf_ric_bytes = genera_pdf_riconsegna(com['id_comodato'], com['nominativo'], com['tipo_soggetto'], com['id_bene'], data_ora_ora, clean_firma_ric, st.session_state.utente_corrente)
                                     
-                                    # ARCHIVIAZIONE IN "RICONSEGNA"
+                                    # ARCHIVIAZIONE NELLA CARTELLA "RICONSEGNA"
                                     if carica_su_drive_unico(pdf_ric_bytes, f"Ricevuta_Riconsegna_{com['id_comodato']}_{com['nominativo']}.pdf", "application/pdf", ID_CARTELLA_RICONSEGNA):
                                         
                                         idx_reg = df_reg_c.index[df_reg_c["id_comodato"].astype(str) == str(com['id_comodato'])].tolist()[0]
@@ -531,7 +536,7 @@ else:
                                             df_inv_c.loc[df_inv_c["id_bene"] == com['id_bene'], "stato"] = "Disponibile"
                                             carica_su_sheet(df_inv_c, "Inventario_Comodati")
                                             
-                                        st.success(f"🔄 Dispositivo {com['id_bene']} ripristinato. Ricevuta archiviata in 'Riconsegna'.")
+                                        st.success(f"🔄 Dispositivo {com['id_bene']} ripristinato in inventario. Ricevuta archiviata.")
                                         st.rerun()
                                 else:
                                     st.error("Inserire la firma grafica per terminare la procedura.")
