@@ -164,9 +164,12 @@ def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione, 
     pdf.set_font("Arial", "I", 10)
     pdf.cell(95, 8, f"F.to {firma_admin_testo}", align="L")
     
-    if firma_base64 and "," in firma_base64:
+    if firma_base64 and len(firma_base64) > 100:
         try:
-            dati_f = firma_base64.split(",")[1]
+            if "," in firma_base64:
+                dati_f = firma_base64.split(",")[1]
+            else:
+                dati_f = firma_base64
             img_data = base64.b64decode(dati_f)
             img = Image.open(io.BytesIO(img_data))
             
@@ -197,7 +200,7 @@ def carica_su_drive_unico(file_bytes, nome_file, mime_type, nome_cartella_dest):
         
         query = f"name='{nome_cartella_dest}' and '{ID_CARTELLA_DRIVE_PRINCIPALE}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false"
         risultato = service.files().list(q=query, spaces='drive', supportsAllDrives=True, includeItemsFromAllDrives=True).execute()
-        files = risultato.get('files', [])
+        files = resultado.get('files', [])
         
         if files: id_cartella = files[0]['id']
         else:
@@ -215,13 +218,6 @@ def carica_su_drive_unico(file_bytes, nome_file, mime_type, nome_cartella_dest):
 if "ruolo_utente" not in st.session_state: st.session_state.ruolo_utente = None
 if "utente_corrente" not in st.session_state: st.session_state.utente_corrente = ""
 if "magazzino_selezionato" not in st.session_state: st.session_state.magazzino_selezionato = None
-if "firma_salvata_b64" not in st.session_state: st.session_state.firma_salvata_b64 = ""
-
-# Intercettiamo i dati inviati dal Canvas HTML tramite i parametri URL interni
-query_params = st.query_params
-if "canvas_sig" in query_params:
-    st.session_state.firma_salvata_b64 = query_params["canvas_sig"]
-    st.query_params.clear()
 
 # Login View
 if st.session_state.ruolo_utente is None:
@@ -257,7 +253,6 @@ else:
     with col_b_logout:
         if st.button("🚪 Cambia Profilo", width="stretch"):
             st.session_state.ruolo_utente = None
-            st.session_state.firma_salvata_b64 = ""
             st.rerun()
             
     st.image(URL_LOGO, width="stretch")
@@ -300,86 +295,88 @@ else:
                     col_n1, col_n2 = st.columns(2)
                     with col_n1:
                         tipo_sog = st.selectbox("Profilo Richiedente:", ["Alunno", "Genitore / Tutore", "Insegnante / Personale"])
-                        nom_sog = st.text_input("Nome e Cognome dell'Assegnatario:", value=st.session_state.get("keep_name", ""))
-                        st.session_state["keep_name"] = nom_sog
+                        nom_sog = st.text_input("Nome e Cognome dell'Assegnatario:")
                     with col_n2:
                         disp = df_inv_comodati[df_inv_comodati["stato"] == "Disponibile"]["id_bene"].tolist()
                         bene_sel = st.selectbox("Seleziona l'oggetto da consegnare:", disp)
                         
                     st.markdown("<div style='background-color:#fff3cd; padding:12px; border-radius:8px; border:1px solid #ffeeba; font-size:13px;'><b>Clausola di Custodia:</b> Il firmatario prende in carico l'oggetto integro e si impegna a custodirlo responsabilmente.</div>", unsafe_allow_html=True)
                     
-                    st.markdown("#### 🖊️ Apponi la firma digitale nel riquadro bianco:")
+                    st.markdown("#### 🖊️ Acquisizione Firma Digitale Sicura:")
 
-                    # Generazione dinamica dell'URL dell'applicazione per il callback sicuro
-                    url_pulito = st.get_option("browser.gatherUsageStats") # Inizializzatore fittizio per retrocompatibilità
+                    # Metodo 100% cloud-safe: Poiché gli iframe bloccano JS, usiamo il caricamento immagine o una firma testuale certificata
+                    metodo_firma = st.radio("Scegli come apporre la firma:", ["✍️ Disegna Firma Digitale (Usa campo sotto)", "🖼️ Carica immagine della firma (Opzionale)"])
                     
-                    # FORM COMPONENTE CANVAS HTML5 INTEGRATO E AUTOSUFFICIENTE
-                    html_pad_firma = f"""
-                    <div style="background: #f8fafc; border: 2px dashed #cbd5e1; padding: 15px; border-radius: 12px; max-width:510px; font-family: sans-serif;">
-                        <canvas id="canvas_firma" width="480" height="160" style="border:2px solid #64748b; background:#ffffff; cursor:crosshair; touch-action: none; border-radius:8px;"></canvas>
-                        <br>
-                        <form id="form_firma" target="_parent" method="GET" action="" style="margin-top:10px; display:flex; gap:10px;">
-                            <input type="hidden" id="canvas_sig" name="canvas_sig" value="">
-                            <button type="button" onclick="pulisciCanvas()" style="padding:10px 20px; background:#ef4444; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold; font-size:14px;">Cancella tutto</button>
-                            <button type="button" onclick="inviaDatiAlServer()" style="padding:10px 20px; background:#22c55e; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold; font-size:14px;">Conferma e Invia Firma</button>
-                        </form>
-                    </div>
+                    firma_base64_finale = ""
 
-                    <script>
-                        var canvas = document.getElementById('canvas_firma');
-                        var ctx = canvas.getContext('2d');
-                        ctx.strokeStyle = '#000000';
-                        ctx.lineWidth = 3;
-                        ctx.lineCap = 'round';
-                        var isDrawing = false;
-                        var haDisegnato = false;
+                    if metodo_firma == "✍️ Disegna Firma Digitale (Usa campo sotto)":
+                        st.info("A causa delle restrizioni di sicurezza del browser sui server cloud, copia la stringa generata dal riquadro e incollala nel campo di convalida.")
+                        
+                        # Questo canvas è indipendente e isolato, mostra la stringa all'utente per incollarla senza saltare l'iframe parent
+                        html_pad_firma = """
+                        <div style="background: #f8fafc; border: 2px dashed #cbd5e1; padding: 15px; border-radius: 12px; max-width:510px; font-family: sans-serif;">
+                            <canvas id="canvas_firma" width="480" height="140" style="border:2px solid #64748b; background:#ffffff; cursor:crosshair; touch-action: none; border-radius:8px;"></canvas>
+                            <br>
+                            <div style="margin-top:10px; display:flex; gap:10px;">
+                                <button type="button" onclick="pulisciCanvas()" style="padding:8px 15px; background:#ef4444; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">Cancella</button>
+                                <button type="button" onclick="generaCodiceFirma()" style="padding:8px 15px; background:#22c55e; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">Genera Codice Firma</button>
+                            </div>
+                            <textarea id="output_b64" style="width:100%; height:50px; margin-top:10px; font-size:10px; color:#334155; border:1px solid #cbd5e1; border-radius:4px; display:none;" readonly></textarea>
+                            <p id="msg_copia" style="font-size:12px; color:#b91c1c; font-weight:bold; margin-top:5px; display:none;">Firma Codificata! Seleziona tutto il testo sotto, copialo (Ctrl+C) e incollalo nel campo di testo di Streamlit.</p>
+                        </div>
 
-                        // Gestione coordinate mouse e touch screen
-                        function getCoordinate(e) {{
-                            var rect = canvas.getBoundingClientRect();
-                            if(e.touches && e.touches.length > 0) {{
-                                return {{ x: e.touches[0].clientX - rect.left, y: e.touches[0].clientY - rect.top }};
-                            }}
-                            return {{ x: e.clientX - rect.left, y: e.clientY - rect.top }};
-                        }}
+                        <script>
+                            var canvas = document.getElementById('canvas_firma');
+                            var ctx = canvas.getContext('2d');
+                            ctx.strokeStyle = '#000000';
+                            ctx.lineWidth = 3;
+                            ctx.lineCap = 'round';
+                            var isDrawing = false;
 
-                        canvas.addEventListener('mousedown', function(e) {{ isDrawing = true; var p = getCoordinate(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); haDisegnato = true; }});
-                        canvas.addEventListener('mousemove', function(e) {{ if(!isDrawing) return; var p = getCoordinate(e); ctx.lineTo(p.x, p.y); ctx.stroke(); }});
-                        canvas.addEventListener('mouseup', function() {{ isDrawing = false; }});
-                        canvas.addEventListener('mouseleave', function() {{ isDrawing = false; }});
+                            function getCoordinate(e) {
+                                var rect = canvas.getBoundingClientRect();
+                                if(e.touches && e.touches.length > 0) {
+                                    return { x: e.touches[0].clientX - rect.left, y: e.touches[0].clientY - rect.top };
+                                }
+                                return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+                            }
 
-                        canvas.addEventListener('touchstart', function(e) {{ isDrawing = true; var p = getCoordinate(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); haDisegnato = true; e.preventDefault(); }}, {{passive: false}});
-                        canvas.addEventListener('touchmove', function(e) {{ if(!isDrawing) return; var p = getCoordinate(e); ctx.lineTo(p.x, p.y); ctx.stroke(); e.preventDefault(); }}, {{passive: false}});
-                        canvas.addEventListener('touchend', function() {{ isDrawing = false; }});
+                            canvas.addEventListener('mousedown', function(e) { isDrawing = true; var p = getCoordinate(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); });
+                            canvas.addEventListener('mousemove', function(e) { if(!isDrawing) return; var p = getCoordinate(e); ctx.lineTo(p.x, p.y); ctx.stroke(); });
+                            canvas.addEventListener('mouseup', function() { isDrawing = false; });
 
-                        function pulisciCanvas() {{ 
-                            ctx.clearRect(0, 0, canvas.width, canvas.height); 
-                            haDisegnato = false;
-                        }}
+                            canvas.addEventListener('touchstart', function(e) { isDrawing = true; var p = getCoordinate(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); e.preventDefault(); }, {passive: false});
+                            canvas.addEventListener('touchmove', function(e) { if(!isDrawing) return; var p = getCoordinate(e); ctx.lineTo(p.x, p.y); ctx.stroke(); e.preventDefault(); }, {passive: false});
+                            canvas.addEventListener('touchend', function() { isDrawing = false; });
 
-                        function inviaDatiAlServer() {{
-                            if(!haDisegnato) {{
-                                alert("Il riquadro è vuoto! Firma prima di inviare.");
-                                return;
-                            }}
-                            var dataUrl = canvas.toDataURL('image/png');
-                            document.getElementById('canvas_sig').value = dataUrl;
-                            
-                            // Imposta dinamicamente l'action del form usando l'URL della finestra principale padre
-                            var form = document.getElementById('form_firma');
-                            form.action = window.parent.location.href.split('?')[0];
-                            form.submit();
-                        }}
-                    </script>
-                    """
-                    st.components.v1.html(html_pad_firma, height=240)
+                            function pulisciCanvas() { 
+                                ctx.clearRect(0, 0, canvas.width, canvas.height); 
+                                document.getElementById('output_b64').style.display = 'none';
+                                document.getElementById('msg_copia').style.display = 'none';
+                            }
 
-                    # Interfaccia di verifica stato firma lato utente
-                    firma_presente = st.session_state.firma_salvata_b64
-                    if firma_presente:
-                        st.success("✅ Firma registrata con successo nel backend! Pronto per la generazione.")
+                            function generaCodiceFirma() {
+                                var dataUrl = canvas.toDataURL('image/png');
+                                var txt = document.getElementById('output_b64');
+                                txt.value = dataUrl;
+                                txt.style.display = 'block';
+                                document.getElementById('msg_copia').style.display = 'block';
+                                txt.select();
+                            }
+                        </script>
+                        """
+                        st.components.v1.html(html_pad_firma, height=270)
+                        
+                        stringa_incollata = st.text_area("Incolla qui il Codice Firma generato sopra (Inizia con 'data:image/png;base64...'):", value="")
+                        if stringa_incollata.startswith("data:image/png;base64,"):
+                            firma_base64_finale = stringa_incollata
+                            st.success("✅ Codice firma verificato e pronto!")
+
                     else:
-                        st.info("ℹ️ Disegna la firma e premi il pulsante verde 'Conferma e Invia Firma' dentro il riquadro.")
+                        file_firma = st.file_uploader("Carica un'immagine della firma (PNG/JPG):", type=["png", "jpg", "jpeg"])
+                        if file_firma is not None:
+                            firma_base64_finale = "data:image/png;base64," + base64.b64encode(file_firma.read()).decode("utf-8")
+                            st.success("✅ Immagine firma caricata!")
 
                     # Pulsante di esecuzione finale e salvataggio cloud
                     if st.button("🚀 Approva, Genera Verbale e Salva PDF su Google Drive", type="primary", width="stretch"):
@@ -387,14 +384,14 @@ else:
                         
                         if not nome_pulito:
                             st.error("Errore: Compila il campo 'Nome e Cognome dell'Assegnatario' prima di procedere.")
-                        elif not firma_presente or len(firma_presente) < 500:
-                            st.error("⚠️ Attenzione: Firma non rilevata. Ricordati di cliccare sul tasto verde 'Conferma e Invia Firma' prima di cliccare qui.")
+                        elif not firma_base64_finale:
+                            st.error("⚠️ Attenzione: Firma mancante. Genera il codice dal riquadro e incollalo, oppure carica un file immagine.")
                         else:
                             with st.spinner("Generazione del documento ed upload su Google Drive cloud in corso..."):
                                 id_com = int(df_reg_comodati["id_comodato"].astype(float).max()) + 1 if not df_reg_comodati.empty else 1001
                                 data_ora = datetime.now().strftime("%d/%m/%Y %H:%M")
                                 
-                                pdf_output_bytes = genera_pdf_comodato(id_com, nome_pulito, tipo_sog, bene_sel, data_ora, "CONSEGNA", firma_presente, st.session_state.utente_corrente)
+                                pdf_output_bytes = genera_pdf_comodato(id_com, nome_pulito, tipo_sog, bene_sel, data_ora, "CONSEGNA", firma_base64_finale, st.session_state.utente_corrente)
                                 nome_file_pdf = f"Verbale_Consegna_{id_com}_{nome_pulito.replace(' ', '_')}.pdf"
                                 
                                 if carica_su_drive_unico(pdf_output_bytes, nome_file_pdf, "application/pdf", "Comodati_Consegne"):
@@ -405,7 +402,6 @@ else:
                                     df_inv_comodati.loc[df_inv_comodati["id_bene"] == bene_sel, "stato"] = "Assegnato"
                                     carica_su_sheet(df_inv_comodati, "Inventario_Comodati")
                                     
-                                    st.session_state.firma_salvata_b64 = "" # Svuota la cache per la prossima firma
                                     st.success(f"🎉 Successo! Contratto N°{id_com} registrato e PDF archiviato su Drive.")
                                     st.rerun()
                                 else:
