@@ -120,7 +120,7 @@ def carica_su_sheet(df, nome_scheda):
         worksheet.update(valori)
     except Exception: pass
 
-# --- GENERAZIONE PDF CON FIRMA ---
+# --- GENERAZIONE PDF CON RIMOZIONE DELLO SFONDO TRASPARENTE (EVITA IL QUADRATO NERO) ---
 def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione, firma_base64=None, utente_loggato="Ufficio Tecnico"):
     if not FPDF_AVAILABLE:
         return b"Errore libreria PDF"
@@ -171,13 +171,17 @@ def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione, 
             else:
                 dati_f = firma_base64
             img_data = base64.b64decode(dati_f)
-            img = Image.open(io.BytesIO(img_data))
+            img_originale = Image.open(io.BytesIO(img_data))
+            
+            # SOLUZIONE CRITICA: Crea un canvas bianco per eliminare la trasparenza distruttiva
+            sfondo_bianco = Image.new("RGBA", img_originale.size, "WHITE")
+            sfondo_bianco.paste(img_originale, (0, 0), img_originale)
             
             img_buffer = io.BytesIO()
-            img.convert("RGB").save(img_buffer, format="JPEG")
+            sfondo_bianco.convert("RGB").save(img_buffer, format="JPEG", quality=95)
             img_buffer.seek(0)
             
-            pdf.image(img_buffer, x=115, y=y_posizione_firme + 8, w=65, h=20)
+            pdf.image(img_buffer, x=115, y=y_posizione_firme + 4, w=65, h=20)
         except Exception:
             pdf.cell(95, 8, "[Firma Digitale Acquisita]", align="L", ln=True)
     else:
@@ -200,7 +204,6 @@ def carica_su_drive_unico(file_bytes, nome_file, mime_type, nome_cartella_dest):
         
         id_cartella_final = ID_CARTELLA_DRIVE_PRINCIPALE
         
-        # Tentativo di organizzazione in sotto-cartelle (se fallisce a causa di diritti limitati, passa oltre)
         try:
             query = f"name='{nome_cartella_dest}' and '{ID_CARTELLA_DRIVE_PRINCIPALE}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false"
             risultato = service.files().list(q=query, spaces='drive', supportsAllDrives=True, includeItemsFromAllDrives=True).execute()
@@ -212,7 +215,6 @@ def carica_su_drive_unico(file_bytes, nome_file, mime_type, nome_cartella_dest):
                 meta_cartella = {'name': nome_cartella_dest, 'mimeType': 'application/vnd.google-apps.folder', 'parents': [ID_CARTELLA_DRIVE_PRINCIPALE]}
                 id_cartella_final = service.files().create(body=meta_cartella, fields='id', supportsAllDrives=True).execute().get('id')
         except Exception:
-            # Fallback forzato sulla cartella radice fornita dall'utente in caso di blocco permessi
             id_cartella_final = ID_CARTELLA_DRIVE_PRINCIPALE
             
         meta_file = {'name': nome_file, 'parents': [id_cartella_final]}
@@ -310,7 +312,7 @@ else:
                         
                     st.markdown("<div style='background-color:#fff3cd; padding:12px; border-radius:8px; border:1px solid #ffeeba; font-size:13px;'><b>Clausola di Custodia:</b> Il firmatario prende in carico l'oggetto integro e si impegna a custodirlo responsabilmente.</div>", unsafe_allow_html=True)
                     
-                    st.markdown("#### 🖊 ... Acquisizione Firma Digitale:");
+                    st.markdown("#### 🖊️ Acquisizione Firma Digitale:");
 
                     metodo_firma = st.radio("Scegli come apporre la firma:", ["✍️ Disegna Firma Digitale (Usa campo sotto)", "🖼️ Carica immagine della firma (Opzionale)"])
                     
