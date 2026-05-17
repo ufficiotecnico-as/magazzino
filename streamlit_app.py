@@ -188,7 +188,7 @@ class PDFMinisteriale(FPDF):
         self.set_line_width(0.1)
         self.line(15, self.get_y(), 195, self.get_y())
         self.set_font("Arial", "", 7)
-        self.cell(180, 4, 'ISISS "A. SCARPA"       Via Primo Maggio, 3 31045 Motta di Livenza (Tv)      C.F. 94071460268      Codice univoco UFOA6X', ln=True, align="C")
+        self.cell(180, 4, 'ISISS "A. SCARPA"      Via Primo Maggio, 3 31045 Motta di Livenza (Tv)      C.F. 94071460268      Codice univoco UFOA6X', ln=True, align="C")
 
 def pulisci_caratteri_fpdf(testo):
     mappa = { "à": "a'", "á": "a'", "è": "e'", "é": "e'", "ì": "i'", "ò": "o'", "ù": "u'" }
@@ -506,7 +506,7 @@ else:
                                     bene_assegnato = st.selectbox("Seleziona seriale fisico da assegnare:", disp, key=f"b_{riga['id_richiesta']}")
                                 else:
                                     bene_assegnato = st.text_input("Lotto / Quantità materiale consegnato:", value="1 Conf.", key=f"b_{riga['id_richiesta']}")
-                            
+                                    
                             with col2:
                                 st.markdown("#### 🖊️ Acquisizione Firma Digitale:")
                                 metodo_firma = st.radio("Scegli come apporre la firma:", ["✍️ Disegna Firma Digitale", "🖼️ Carica immagine"], key=f"metodo_{riga['id_richiesta']}")
@@ -579,7 +579,7 @@ else:
                                 st.info("Predisposizione del dispositivo: verificare l'integrità del bene prima di validare la firma di riconsegna.")
                                 nota_ritiro = st.text_input("Note sullo stato del bene al rientro:", value="Bene restituito integro", key=f"nota_reso_{comodato['id_comodato']}")
                                 email_notifica_reso = st.text_input("Invia copia del verbale a questa email (Opzionale):", value="", key=f"email_reso_{comodato['id_comodato']}")
-                            
+                                
                             with col2_r:
                                 st.markdown("#### 🖊️ Acquisizione Firma Digitale (Riconsegna):")
                                 metodo_firma_r = st.radio("Metodo firma:", ["✍️ Disegna", "🖼️ Carica immagine"], key=f"met_reso_{comodato['id_comodato']}")
@@ -625,12 +625,12 @@ else:
                                         if not df_inv_r.empty and comodato['id_bene'] in df_inv_r["id_bene"].values.tolist():
                                             df_inv_r.loc[df_inv_r["id_bene"] == comodato['id_bene'], "stato"] = "Disponibile"
                                             carica_su_sheet(df_inv_r, "Inventario_Comodati")
-                                        
+                                            
                                         st.success(f"Riconsegna completata con successo!")
                                         st.rerun()
                                 else:
                                     st.error("Inserire la firma digitale per validare il rientro del bene.")
-                                        
+                                    
             with tab_tutti_comodati:
                 st.dataframe(scarica_da_sheet("Inventario_Comodati"), use_container_width=True, hide_index=True)
                 
@@ -638,8 +638,63 @@ else:
                 st.dataframe(df_istanze, use_container_width=True, hide_index=True)
 
     # ==========================================
-    # WORKFLOW 4: ALTRI MAGAZZINI (ATA O STANDARD)
+    # WORKFLOW 4: MODIFICATO INTERAMENTE ED ESCLUSIVAMENTE PER MAGAZZINIERI (ATA O STANDARD)
     # ==========================================
     elif st.session_state.ruolo_utente == "magazziniere":
-        st.markdown(f"## 📦 Magazzino Standard: {st.session_state.magazzino_selezionato}")
-        st.dataframe(scarica_da_sheet(MAPPA_SCHEDE[st.session_state.magazzino_selezionato]["inventario"]), use_container_width=True, hide_index=True)
+        st.markdown(f"## 📦 Magazzino Operativo: {st.session_state.magazzino_selezionato}")
+        
+        # Recupero i nomi delle schede dinamiche in base al magazzino loggato
+        scheda_inventario = MAPPA_SCHEDE[st.session_state.magazzino_selezionato]["inventario"]
+        scheda_richieste = MAPPA_SCHEDE[st.session_state.magazzino_selezionato]["richieste"]
+        
+        tab_inv, tab_req = st.tabs(["📋 INVENTARIO MERCI", "📥 RICHIESTE REPARTO"])
+        
+        with tab_inv:
+            st.subheader("Giacenzen di Magazzino Attuali")
+            df_inventario_standard = scarica_da_sheet(scheda_inventario)
+            
+            if df_inventario_standard.empty:
+                st.warning("Inventario vuoto o non configurato su Google Sheets.")
+            else:
+                st.dataframe(df_inventario_standard, use_container_width=True, hide_index=True)
+                
+                st.markdown("### 🔄 Rettifica Giacenza Articolo")
+                with st.form("form_giacenze_standard"):
+                    elemento_sel = st.selectbox(
+                        "Seleziona Articolo:", 
+                        df_inventario_standard["elemento"].tolist() if "elemento" in df_inventario_standard.columns else []
+                    )
+                    nuova_qta = st.number_input("Nuova quantità registrata:", min_value=0, step=1)
+                    
+                    if st.form_submit_button("Salva Modifica"):
+                        if "elemento" in df_inventario_standard.columns:
+                            df_inventario_standard.loc[df_inventario_standard["elemento"] == elemento_sel, "valore"] = nuova_qta
+                            carica_su_sheet(df_inventario_standard, scheda_inventario)
+                            st.success(f"Giacenza aggiornata per {elemento_sel}!")
+                            st.rerun()
+                            
+        with tab_req:
+            st.subheader("Richieste Assegnate al Reparto")
+            df_richieste_standard = scarica_da_sheet(scheda_richieste)
+            
+            if df_richieste_standard.empty:
+                st.info("Nessuna richiesta in coda per questo magazzino.")
+            else:
+                st.dataframe(df_richieste_standard, use_container_width=True, hide_index=True)
+                
+                st.markdown("### ⚙️ Cambia Stato Ordine Interno")
+                id_list = df_richieste_standard["id_richiesta"].astype(str).tolist() if "id_richiesta" in df_richieste_standard.columns else []
+                
+                if id_list:
+                    col_id, col_st = st.columns(2)
+                    with col_id:
+                        id_sel = st.selectbox("Seleziona ID Richiesta:", id_list, key="sel_std_id")
+                    with col_st:
+                        stato_sel = st.selectbox("Imposta Nuovo Stato:", ["Preso in Carico", "Pronto al Ritiro", "Materiale Consegnato", "Annullato"], key="sel_std_st")
+                        
+                    if st.button("Aggiorna Ordine", type="primary"):
+                        idx = df_richieste_standard.index[df_richieste_standard["id_richiesta"].astype(str) == str(id_sel)].tolist()[0]
+                        df_richieste_standard.at[idx, "stato"] = stato_sel
+                        carica_su_sheet(df_richieste_standard, scheda_richieste)
+                        st.success(f"Richiesta {id_sel} impostata su: {stato_sel}")
+                        st.rerun()
