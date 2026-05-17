@@ -344,7 +344,7 @@ if st.session_state.ruolo_utente is None:
                     if nome.strip() and email_ut.strip():
                         st.session_state.ruolo_utente = "collaboratore"
                         st.session_state.utente_corrente = nome.strip()
-                        st.session_state.ruolo_specifico = suelo
+                        st.session_state.ruolo_specifico = ruolo
                         st.session_state.email_utente = email_ut.strip()
                         st.rerun()
                     else: st.error("Compila tutti i campi obbligatori.")
@@ -541,7 +541,8 @@ else:
                                         df_istanze.at[idx, "stato"] = "Assegnata"
                                         carica_su_sheet(df_istanze, "Richieste_Preside")
                                         
-                                        nuovo_c = pd.DataFrame([{"id_comodato": id_com, "tipo_soggetto", riga['ruolo_richiedente'], "nominativo": riga['richiedente'], "id_bene": bene_assegnato, "data_consegna": data_ora, "stato_comodato": "Chiuso/Consegnato"}])
+                                        # RISOLTO QUI IL SYNTAXERROR (Sostituita la virgola con i due punti dopo "tipo_soggetto")
+                                        nuovo_c = pd.DataFrame([{"id_comodato": id_com, "tipo_soggetto": riga['ruolo_richiedente'], "nominativo": riga['richiedente'], "id_bene": bene_assegnato, "data_consegna": data_ora, "stato_comodato": "Chiuso/Consegnato"}])
                                         carica_su_sheet(pd.concat([df_reg_c, nuovo_c], ignore_index=True), "Registro_Comodati")
                                         
                                         if riga['categoria_bene'] in ["PC Notebook", "Chiave d'Accesso"]:
@@ -638,7 +639,7 @@ else:
                 st.dataframe(df_istanze, use_container_width=True, hide_index=True)
 
     # ==========================================
-    # WORKFLOW 4: MODIFICATO INTERAMENTE ED ESCLUSIVAMENTE PER MAGAZZINIERI (CON TAB E AGGIUNTA ELEMENTI)
+    # WORKFLOW 4: INTERFACCIA COMPLETA MAGAZZINIERI (CON TAB ED AGGIUNTA NUOVI ARTICOLI)
     # ==========================================
     elif st.session_state.ruolo_utente == "magazziniere":
         st.markdown(f"## 📦 Magazzino Operativo: {st.session_state.magazzino_selezionato}")
@@ -655,12 +656,12 @@ else:
             
             if df_inventario_standard.empty:
                 st.warning("Inventario vuoto o non configurato su Google Sheets.")
-                # Se è completamente vuoto, creiamo la struttura base per poter inserire elementi
+                # Se è vuoto, inizializziamo la struttura base colonne
                 df_inventario_standard = pd.DataFrame(columns=["id", "elemento", "valore"])
             else:
                 st.dataframe(df_inventario_standard, use_container_width=True, hide_index=True)
             
-            # Layout a due colonne per dividere le azioni di modifica e inserimento
+            # Layout a due colonne per dividere le azioni di Inserimento e Modifica quantità
             col_add, col_edit = st.columns(2)
             
             with col_add:
@@ -672,7 +673,7 @@ else:
                     
                     if st.form_submit_button("Inserisci nel Magazzino", type="primary"):
                         if nuovo_id_item.strip() and nuovo_nome_item.strip():
-                            # Controllo se l'elemento o l'ID esiste già
+                            # Controllo se l'ID esiste già per evitare doppioni
                             id_esiste = False
                             if "id" in df_inventario_standard.columns:
                                 id_esiste = str(nuovo_id_item.strip()) in df_inventario_standard["id"].astype(str).tolist()
@@ -690,7 +691,7 @@ else:
                                 st.success(f"✅ Articolo '{nuovo_nome_item}' aggiunto con successo!")
                                 st.rerun()
                         else:
-                            st.error("Compila tutti i campi (ID e Nome) per aggiungere l'articolo.")
+                            st.error("Compila tutti i campi obbligatori (ID e Nome) per aggiungere l'articolo.")
                             
             with col_edit:
                 st.markdown("### 🔄 Rettifica Giacenza Articolo Esistente")
@@ -700,7 +701,7 @@ else:
                             "Seleziona Articolo da modificare:", 
                             df_inventario_standard["elemento"].tolist()
                         )
-                        # Recupera il valore corrente per pre-compilare il campo
+                        # Recupera il valore corrente per pre-compilare il campo numerico
                         valore_attuale = 0
                         try:
                             valore_attuale = int(df_inventario_standard.loc[df_inventario_standard["elemento"] == elemento_sel, "valore"].values[0])
