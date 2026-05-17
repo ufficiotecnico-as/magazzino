@@ -121,7 +121,7 @@ def carica_su_sheet(df, nome_scheda):
     except Exception: pass
 
 
-# --- CLASSE PDF SINGOLA PAGINA ---
+# --- CLASSE PDF OTTIMIZZATA PER PAGINA SINGOLA ---
 class PDFMinisteriale(FPDF):
     def footer(self):
         self.set_y(-20)
@@ -137,7 +137,8 @@ class PDFMinisteriale(FPDF):
         self.cell(180, 3, "Documento informatico firmato digitalmente ai sensi del D.Lgs 82/2005 CAD art.45, ss.mm.ii e norme collegate.", ln=True, align="C")
 
 
-def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione, firma_base64=None, utente_loggato="Ufficio Tecnico", dicitura_firma_dx="Firma del Richiedente:"):
+# --- GENERAZIONE PDF COMPATTA (Pulita da accenti storti) ---
+def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione, firma_base64=None, utente_loggato="Ufficio Tecnico"):
     if not FPDF_AVAILABLE:
         return b"Errore libreria PDF"
     
@@ -146,7 +147,7 @@ def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione, 
     pdf.set_auto_page_break(auto=True, margin=25) 
     pdf.add_page()
     
-    # 1. Intestazione
+    # 1. Intestazione Istituzionale
     try:
         pdf.image(URL_LOGO, x=15, y=10, w=180)
         pdf.ln(18)
@@ -155,7 +156,7 @@ def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione, 
         pdf.cell(180, 6, "ISISS ANTONIO SCARPA", ln=True, align="C")
         pdf.ln(8)
         
-    # 2. Protocollo e Data
+    # 2. Segnatura / Protocollo e Data locale
     pdf.set_font("Times", "", 10)
     data_corrente = data.split(" ")[0] if " " in data else data
     
@@ -171,7 +172,7 @@ def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione, 
     pdf.cell(85, 5, f"Sig./Sigg. {nome} ({ruolo})", ln=True, align="L")
     pdf.ln(6)
     
-    # 4. Oggetto (Rimosse tutte le virgolette e gli apostrofi curvi per evitare crash Unicode)
+    # 4. Oggetto Strutturato
     pdf.set_font("Times", "B", 10)
     pdf.cell(22, 5, "OGGETTO: ", ln=False)
     pdf.set_font("Times", "", 10)
@@ -181,12 +182,14 @@ def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione, 
     else:
         testo_oggetto = f"Ricevuta di Riconsegna, Scarico Logistico e Cessazione Comodato d'Uso - Registro ID {id_contratto}."
     
+    # Evitiamo crash pulendo caratteri particolari
     testo_oggetto = testo_oggetto.replace("’", "'").replace("“", '"').replace("”", '"')
     pdf.multi_cell(158, 5, testo_oggetto)
     pdf.ln(4)
     
-    # 5. Corpo (Pulito da apostrofi tipografici curvi)
+    # 5. Corpo del Testo
     pdf.set_font("Times", "", 10)
+    
     if tipo_operazione == "CONSEGNA":
         corpo_testo = (
             f"Con la presente si attesta che in data odierna l'Amministrazione dell'Istituto Superiore "
@@ -212,12 +215,15 @@ def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione, 
     pdf.multi_cell(180, 5.5, corpo_testo, align="J")
     pdf.ln(8)
     
-    # 6. Blocco Firme
+    # 6. Blocco Firme Ottimizzato
     pdf.set_font("Times", "B", 10)
     y_posizione_firme = pdf.get_y()
     
     pdf.cell(100, 5, "Per l'Amministrazione:", align="L")
-    pdf.cell(80, 5, dicitura_firma_dx, align="L", ln=True)
+    if tipo_operazione == "CONSEGNA":
+        pdf.cell(80, 5, "Firma del Richiedente:", align="L", ln=True)
+    else:
+        pdf.cell(80, 5, "Firma del Riconsegnante:", align="L", ln=True)
     
     pdf.set_font("Times", "I", 9)
     pdf.cell(100, 5, "RESP. Ufficio Tecnico", align="L")
@@ -237,69 +243,13 @@ def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione, 
             
             pdf.image(img_buffer, x=115, y=y_posizione_firme + 5, w=42, h=11)
         except Exception:
-            pdf.cell(80, 5, "[Firma Acquisita digitalmente]", align="L", ln=True)
+            pdf.cell(80, 5, "[Firma Digitale Acquisita]", align="L", ln=True)
     else:
         pdf.cell(80, 5, "____________________________", align="L", ln=True)
 
     return pdf.output()
 
-
-# --- CORREZIONE CRITICA DEL PAD DI FIRMA (Sintassi JS Ripristinata) ---
-def renderizza_pad_firma(chiave_univoca):
-    html_pad_firma = f"""
-    <div style="background: #f8fafc; border: 2px dashed #cbd5e1; padding: 12px; border-radius: 12px; max-width:490px; font-family: sans-serif;">
-        <canvas id="canvas_{chiave_univoca}" width="460" height="120" style="border:2px solid #64748b; background:#ffffff; cursor:crosshair; touch-action: none; border-radius:8px;"></canvas>
-        <div style="margin-top:8px; display:flex; gap:10px;">
-            <button type="button" onclick="pulisci_{chiave_univoca}()" style="padding:6px 12px; background:#ef4444; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold; font-size:12px;">Cancella</button>
-            <button type="button" onclick="salva_{chiave_univoca}()" style="padding:6px 12px; background:#22c55e; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold; font-size:12px;">Conferma e Collega Firma</button>
-        </div>
-    </div>
-
-    <script>
-        var canvas = document.getElementById('canvas_{chiave_univoca}');
-        var ctx = canvas.getContext('2d');
-        ctx.strokeStyle = '#000000';
-        ctx.lineWidth = 3;
-        ctx.lineCap = 'round';
-        var isDrawing = false;
-
-        function getCoordinate(e) {{
-            var rect = canvas.getBoundingClientRect();
-            if(e.touches && e.touches.length > 0) {{
-                return {{ x: e.touches[0].clientX - rect.left, y: e.touches[0].clientY - rect.top }};
-            }}
-            return {{ x: e.clientX - rect.left, y: e.clientY - rect.top }};
-        }}
-
-        canvas.addEventListener('mousedown', function(e) {{ isDrawing = true; var p = getCoordinate(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); }});
-        canvas.addEventListener('mousemove', function(e) {{ if(!isDrawing) return; var p = getCoordinate(e); ctx.lineTo(p.x, p.y); ctx.stroke(); }});
-        canvas.addEventListener('mouseup', function() {{ isDrawing = false; }});
-
-        canvas.addEventListener('touchstart', function(e) {{ isDrawing = true; var p = getCoordinate(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); e.preventDefault(); }}, {{passive: false}});
-        canvas.addEventListener('touchmove', function(e) {{ if(!isDrawing) return; var p = getCoordinate(e); ctx.lineTo(p.x, p.y); ctx.stroke(); e.preventDefault(); }}, {{passive: false}});
-        canvas.addEventListener('touchend', function() {{ isDrawing = false; }});
-
-        function pulisci_{chiave_univoca}() {{ 
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            window.parent.postMessage({{type: 'streamlit:setComponentValue', value: ''}}, '*');
-        }}
-
-        function salva_{chiave_univoca}() {{
-            var dataUrl = canvas.toDataURL('image/png');
-            const campi = window.parent.document.querySelectorAll('textarea');
-            campi.forEach(el => {{
-                if(el.ariaLabel && el.ariaLabel.includes('{chiave_univoca}')) {{
-                    el.value = dataUrl;
-                    el.dispatchEvent(new Event('input', {{ bubbles: true }}));
-                }}
-            }});
-            alert("Firma agganciata con successo alla pratica!");
-        }}
-    </script>
-    """
-    return st.components.v1.html(html_pad_firma, height=180)
-
-
+# --- CARICAMENTO SU DRIVE ---
 def carica_su_drive_unico(file_bytes, nome_file, mime_type, nome_cartella_dest):
     if not GOOGLE_DRIVE_AVAILABLE: return None
     creds_info = None
@@ -313,27 +263,33 @@ def carica_su_drive_unico(file_bytes, nome_file, mime_type, nome_cartella_dest):
         service = build('drive', 'v3', credentials=creds)
         
         id_cartella_final = ID_CARTELLA_DRIVE_PRINCIPALE
+        
         try:
             query = f"name='{nome_cartella_dest}' and '{ID_CARTELLA_DRIVE_PRINCIPALE}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false"
             risultato = service.files().list(q=query, spaces='drive', supportsAllDrives=True, includeItemsFromAllDrives=True).execute()
             files = risultato.get('files', [])
-            if files: id_cartella_final = files[0]['id']
+            
+            if files: 
+                id_cartella_final = files[0]['id']
             else:
                 meta_cartella = {'name': nome_cartella_dest, 'mimeType': 'application/vnd.google-apps.folder', 'parents': [ID_CARTELLA_DRIVE_PRINCIPALE]}
                 id_cartella_final = service.files().create(body=meta_cartella, fields='id', supportsAllDrives=True).execute().get('id')
-        except Exception: id_cartella_final = ID_CARTELLA_DRIVE_PRINCIPALE
+        except Exception:
+            id_cartella_final = ID_CARTELLA_DRIVE_PRINCIPALE
             
         meta_file = {'name': nome_file, 'parents': [id_cartella_final]}
         media = MediaIoBaseUpload(io.BytesIO(file_bytes), mimetype=mime_type, resumable=True)
         service.files().create(body=meta_file, media_body=media, fields='id', supportsAllDrives=True).execute()
         return True
-    except Exception: return None
+    except Exception:
+        return None
 
-
+# Inizializzazione Stati sessione
 if "ruolo_utente" not in st.session_state: st.session_state.ruolo_utente = None
 if "utente_corrente" not in st.session_state: st.session_state.utente_corrente = ""
 if "magazzino_selezionato" not in st.session_state: st.session_state.magazzino_selezionato = None
 
+# Login View
 if st.session_state.ruolo_utente is None:
     col_l, col_c, col_r = st.columns([1, 1.8, 1])
     with col_c:
@@ -371,6 +327,7 @@ else:
             
     st.image(URL_LOGO, use_container_width=True)
 
+    # --- MAIN ADMIN INTERFACE ---
     if st.session_state.ruolo_utente == "admin":
         tab_magazzini, tab_comodati = st.tabs(["📊 MAGAZZINI LOGISTICI", "✍️ GESTIONE COMODATI (PC & CHIAVI)"])
         
@@ -413,28 +370,107 @@ else:
                         disp = df_inv_comodati[df_inv_comodati["stato"] == "Disponibile"]["id_bene"].tolist()
                         bene_sel = st.selectbox("Seleziona l'oggetto da consegnare:", disp)
                         
-                    st.markdown("#### 🖊️ Firma Consegna Richiedente:")
-                    renderizza_pad_firma("FirmaConsegna")
-                    codice_firma_consegna = st.text_area("Buffer Dati (FirmaConsegna)", label_visibility="collapsed", key="txt_FirmaConsegna")
+                    st.markdown("<div style='background-color:#fff3cd; padding:12px; border-radius:8px; border:1px solid #ffeeba; font-size:13px;'><b>Clausola di Custodia:</b> Il firmatario prende in carico l'oggetto integro e si impegna a custodirlo responsabilmente.</div>", unsafe_allow_html=True)
+                    
+                    st.markdown("#### 🖊️ Acquisizione Firma Digitale (Consegna):")
+                    metodo_firma = st.radio("Scegli come apporre la firma:", ["✍️ Disegna Firma Digitale (Usa campo sotto)", "🖼️ Carica immagine della firma"], key="metodo_consegna")
+                    
+                    firma_base64_finale = ""
 
-                    if st.button("🚀 Approva e Genera Verbale di Consegna", type="primary", use_container_width=True):
+                    if metodo_firma == "✍️ Disegna Firma Digitale (Usa campo sotto)":
+                        st.info("Esegui il disegno nel riquadro, clicca sul pulsante verde 'Genera Codice Firma', seleziona tutto il testo magico apparso, copialo ed incollalo nel campo grigio.")
+                        
+                        html_pad_firma = """
+                        <div style="background: #f8fafc; border: 2px dashed #cbd5e1; padding: 15px; border-radius: 12px; max-width:510px; font-family: sans-serif;">
+                            <canvas id="canvas_firma" width="480" height="140" style="border:2px solid #64748b; background:#ffffff; cursor:crosshair; touch-action: none; border-radius:8px;"></canvas>
+                            <br>
+                            <div style="margin-top:10px; display:flex; gap:10px;">
+                                <button type="button" onclick="pulisciCanvas()" style="padding:8px 15px; background:#ef4444; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">Cancella</button>
+                                <button type="button" onclick="generaCodiceFirma()" style="padding:8px 15px; background:#22c55e; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">Genera Codice Firma</button>
+                            </div>
+                            <textarea id="output_b64" style="width:100%; height:50px; margin-top:10px; font-size:10px; color:#334155; border:1px solid #cbd5e1; border-radius:4px; display:none;" readonly></textarea>
+                            <p id="msg_copia" style="font-size:12px; color:#b91c1c; font-weight:bold; margin-top:5px; display:none;">Firma Codificata! Fai triplo click nella casella sopra, copia tutto il testo (Ctrl+C) e incollalo nel campo Streamlit sotto.</p>
+                        </div>
+
+                        <script>
+                            var canvas = document.getElementById('canvas_firma');
+                            var ctx = canvas.getContext('2d');
+                            ctx.strokeStyle = '#000000';
+                            ctx.lineWidth = 3;
+                            ctx.lineCap = 'round';
+                            var isDrawing = false;
+
+                            function getCoordinate(e) {
+                                var rect = canvas.getBoundingClientRect();
+                                if(e.touches && e.touches.length > 0) {
+                                    return { x: e.touches[0].clientX - rect.left, y: e.touches[0].clientY - rect.top };
+                                }
+                                return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+                            }
+
+                            canvas.addEventListener('mousedown', function(e) { isDrawing = true; var p = getCoordinate(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); });
+                            canvas.addEventListener('mousemove', function(e) { if(!isDrawing) return; var p = getCoordinate(e); ctx.lineTo(p.x, p.y); ctx.stroke(); });
+                            canvas.addEventListener('mouseup', function() { isDrawing = false; });
+
+                            canvas.addEventListener('touchstart', function(e) { isDrawing = true; var p = getCoordinate(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); e.preventDefault(); }, {passive: false});
+                            canvas.addEventListener('touchmove', function(e) { if(!isDrawing) return; var p = getCoordinate(e); ctx.lineTo(p.x, p.y); ctx.stroke(); e.preventDefault(); }, {passive: false});
+                            canvas.addEventListener('touchend', function() { isDrawing = false; });
+
+                            function pulisciCanvas() { 
+                                ctx.clearRect(0, 0, canvas.width, canvas.height); 
+                                document.getElementById('output_b64').style.display = 'none';
+                                document.getElementById('msg_copia').style.display = 'none';
+                            }
+
+                            function generaCodiceFirma() {
+                                var dataUrl = canvas.toDataURL('image/png');
+                                var txt = document.getElementById('output_b64');
+                                txt.value = dataUrl;
+                                txt.style.display = 'block';
+                                document.getElementById('msg_copia').style.display = 'block';
+                                txt.select();
+                            }
+                        </script>
+                        """
+                        st.components.v1.html(html_pad_firma, height=270)
+                        
+                        stringa_incollata = st.text_area("Incolla qui il Codice Firma generato sopra:", value="", key="stringa_consegna")
+                        if stringa_incollata.startswith("data:image/png;base64,"):
+                            firma_base64_finale = stringa_incollata
+                            st.success("✅ Codice firma verificato e pronto!")
+                    else:
+                        file_firma = st.file_uploader("Carica un'immagine della firma (PNG/JPG):", type=["png", "jpg", "jpeg"], key="upload_consegna")
+                        if file_firma is not None:
+                            firma_base64_finale = "data:image/png;base64," + base64.b64encode(file_firma.read()).decode("utf-8")
+                            st.success("✅ Immagine firma caricata!")
+
+                    if st.button("🚀 Approva, Genera Verbale e Salva PDF su Google Drive", type="primary", use_container_width=True):
                         nome_pulito = nom_sog.strip()
-                        if not nome_pulito: st.error("Inserisci il Nome.")
-                        elif not codice_firma_consegna: st.error("Inserisci la firma sul riquadro e premi 'Conferma'.")
+                        if not nome_pulito:
+                            st.error("Errore: Compila il campo 'Nome e Cognome dell'Assegnatario'.")
+                        elif not firma_base64_finale:
+                            st.error("⚠️ Attenzione: Firma mancante. Genera il codice o carica un file.")
                         else:
-                            with st.spinner("Generazione..."):
+                            with st.spinner("Generazione del documento..."):
                                 id_com = int(df_reg_comodati["id_comodato"].astype(float).max()) + 1 if not df_reg_comodati.empty else 1001
                                 data_ora = datetime.now().strftime("%d/%m/%Y %H:%M")
-                                pdf_bytes = genera_pdf_comodato(id_com, nome_pulito, tipo_sog, bene_sel, data_ora, "CONSEGNA", codice_firma_consegna, st.session_state.utente_corrente, "Firma del Richiedente:")
-                                if carica_su_drive_unico(pdf_bytes, f"Verbale_Consegna_{id_com}.pdf", "application/pdf", "Comodati_Consegne"):
-                                    nuva_r = pd.DataFrame([{"id_comodato": id_com, "tipo_soggetto": tipo_sog, "nominativo": nome_pulito, "id_bene": bene_sel, "data_consegna": data_ora, "stato_comodato": "In Corso"}])
-                                    df_reg_comodati = pd.concat([df_reg_comodati, nuva_r], ignore_index=True)
+                                
+                                pdf_output_bytes = genera_pdf_comodato(id_com, nome_pulito, tipo_sog, bene_sel, data_ora, "CONSEGNA", firma_base64_finale, st.session_state.utente_corrente)
+                                nome_file_pdf = f"Verbale_Consegna_{id_com}_{nome_pulito.replace(' ', '_')}.pdf"
+                                
+                                if carica_su_drive_unico(pdf_output_bytes, nome_file_pdf, "application/pdf", "Comodati_Consegne"):
+                                    nuova_r = pd.DataFrame([{"id_comodato": id_com, "tipo_soggetto": tipo_sog, "nominativo": nome_pulito, "id_bene": bene_sel, "data_consegna": data_ora, "stato_comodato": "In Corso"}])
+                                    df_reg_comodati = pd.concat([df_reg_comodati, nuova_r], ignore_index=True)
                                     carica_su_sheet(df_reg_comodati, "Registro_Comodati")
+                                    
                                     df_inv_comodati.loc[df_inv_comodati["id_bene"] == bene_sel, "stato"] = "Assegnato"
                                     carica_su_sheet(df_inv_comodati, "Inventario_Comodati")
-                                    st.success("Registrato!")
+                                    
+                                    st.success(f"🎉 Contratto N°{id_com} registrato con successo!")
                                     st.rerun()
-
+                                else:
+                                    st.error("Errore d'archiviazione su Google Drive.")
+                            
             with sub_registro:
                 st.markdown("### Registro Contratti Attivi")
                 attivi = df_reg_comodati[df_reg_comodati["stato_comodato"] == "In Corso"] if not df_reg_comodati.empty else pd.DataFrame()
@@ -444,32 +480,100 @@ else:
                         with st.container(border=True):
                             c1, c2 = st.columns([2.5, 1.5])
                             with c1:
-                                st.markdown(f"📦 Oggetto: **{riga['id_bene']}** - Affidato a: **{riga['nominativo']}**")
-                                st.caption(f"Assegnato il: {riga['data_consegna']} | ID Contratto: {riga['id_comodato']}")
+                                st.markdown(f"📦 Oggetto: **{riga['id_bene']}** affidato a **{riga['nominativo']}** ({riga['tipo_soggetto']})")
+                                st.caption(f"Assegnatario il: {riga['data_consegna']} | ID Contratto: {riga['id_comodato']}")
                             with c2:
-                                with st.expander("Effettua Riconsegna ↩"):
-                                    senza_utente = st.checkbox("Riconsegna pervenuta senza richiedente fisicamente presente", key=f"chk_no_ut_{riga['id_comodato']}")
-                                    dicitura_label = "Firma del Responsabile di Magazzino:" if senza_utente else "Firma di chi riconsegna il bene:"
+                                # Esplosione del modulo di riconsegna per singolo elemento con firma specchiata
+                                with st.expander("Esegui Riconsegna ↩"):
+                                    st.markdown("#### 🖊️ Acquisizione Firma Digitale (Riconsegna):")
+                                    metodo_firma_ric = st.radio("Scegli come apporre la firma per la riconsegna:", ["✍️ Disegna Firma Digitale", "🖼️ Carica immagine"], key=f"metodo_ric_{riga['id_comodato']}")
                                     
-                                    st.caption(dicitura_label)
-                                    renderizza_pad_firma(f"FirmaRiconsegna_{riga['id_comodato']}")
-                                    codice_firma_ric = st.text_area(f"Buffer (FirmaRiconsegna_{riga['id_comodato']})", label_visibility="collapsed")
+                                    firma_ric_finale = ""
                                     
-                                    if st.button("Conferma Riconsegna", key=f"btn_ric_{riga['id_comodato']}", type="primary", use_container_width=True):
-                                        if not codice_firma_ric:
-                                            st.error("Firma obbligatoria per chiudere la pratica.")
-                                        else:
-                                            data_rientro = datetime.now().strftime("%d/%m/%Y %H:%M")
-                                            pdf_r_bytes = genera_pdf_comodato(riga['id_comodato'], riga['nominativo'], riga['tipo_soggetto'], riga['id_bene'], data_rientro, "RICONSEGNA", codice_firma_ric, st.session_state.utente_corrente, dicitura_label)
-                                            carica_su_drive_unico(pdf_r_bytes, f"Ricevuta_Riconsegna_{riga['id_comodato']}.pdf", "application/pdf", "Comodati_Riconsegne")
-                                            
-                                            df_reg_comodati.loc[df_reg_comodati["id_comodato"].astype(str) == str(riga["id_comodato"]), "stato_comodato"] = f"Riconsegnato il {data_rientro}"
-                                            carica_su_sheet(df_reg_comodati, "Registro_Comodati")
-                                            
-                                            df_inv_comodati.loc[df_inv_comodati["id_bene"] == riga["id_bene"], "stato"] = "Disponibile"
-                                            carica_su_sheet(df_inv_comodati, "Inventario_Comodati")
-                                            st.rerun()
+                                    if metodo_firma_ric == "✍️ Disegna Firma Digitale":
+                                        st.caption("Fai il disegno, clicca sul pulsante verde, copia tutto il testo magico e incollalo nel box sotto.")
+                                        
+                                        html_pad_ric = f"""
+                                        <div style="background: #f8fafc; border: 2px dashed #cbd5e1; padding: 15px; border-radius: 12px; max-width:510px; font-family: sans-serif;">
+                                            <canvas id="canvas_ric_{riga['id_comodato']}" width="480" height="140" style="border:2px solid #64748b; background:#ffffff; cursor:crosshair; touch-action: none; border-radius:8px;"></canvas>
+                                            <br>
+                                            <div style="margin-top:10px; display:flex; gap:10px;">
+                                                <button type="button" onclick="pulisciCanvasRic()" style="padding:8px 15px; background:#ef4444; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">Cancella</button>
+                                                <button type="button" onclick="generaCodiceFirmaRic()" style="padding:8px 15px; background:#22c55e; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">Genera Codice Firma</button>
+                                            </div>
+                                            <textarea id="output_b64_ric" style="width:100%; height:50px; margin-top:10px; font-size:10px; color:#334155; border:1px solid #cbd5e1; border-radius:4px; display:none;" readonly></textarea>
+                                        </div>
 
+                                        <script>
+                                            var canvas = document.getElementById("canvas_ric_{riga['id_comodato']}");
+                                            var ctx = canvas.getContext('2d');
+                                            ctx.strokeStyle = '#000000';
+                                            ctx.lineWidth = 3;
+                                            ctx.lineCap = 'round';
+                                            var isDrawing = false;
+
+                                            function getCoordinate(e) {{
+                                                var rect = canvas.getBoundingClientRect();
+                                                if(e.touches && e.touches.length > 0) {{
+                                                    return {{ x: e.touches[0].clientX - rect.left, y: e.touches[0].clientY - rect.top }};
+                                                }}
+                                                return {{ x: e.clientX - rect.left, y: e.clientY - rect.top }};
+                                            }}
+
+                                            canvas.addEventListener('mousedown', function(e) {{ isDrawing = true; var p = getCoordinate(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); }});
+                                            canvas.addEventListener('mousemove', function(e) {{ if(!isDrawing) return; var p = getCoordinate(e); ctx.lineTo(p.x, p.y); ctx.stroke(); }});
+                                            canvas.addEventListener('mouseup', function() {{ isDrawing = false; }});
+
+                                            canvas.addEventListener('touchstart', function(e) {{ isDrawing = true; var p = getCoordinate(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); e.preventDefault(); }}, {{passive: false}});
+                                            canvas.addEventListener('touchmove', function(e) {{ if(!isDrawing) return; var p = getCoordinate(e); ctx.lineTo(p.x, p.y); ctx.stroke(); e.preventDefault(); }}, {{passive: false}});
+                                            canvas.addEventListener('touchend', function() {{ isDrawing = false; }});
+
+                                            function pulisciCanvasRic() {{ 
+                                                ctx.clearRect(0, 0, canvas.width, canvas.height); 
+                                                document.getElementById('output_b64_ric').style.display = 'none';
+                                            }}
+
+                                            function generaCodiceFirmaRic() {{
+                                                var dataUrl = canvas.toDataURL('image/png');
+                                                var txt = document.getElementById('output_b64_ric');
+                                                txt.value = dataUrl;
+                                                txt.style.display = 'block';
+                                                txt.select();
+                                            }}
+                                        </script>
+                                        """
+                                        st.components.v1.html(html_pad_ric, height=250)
+                                        
+                                        stringa_incollata_ric = st.text_area("Incolla qui il Codice Firma di Riconsegna:", value="", key=f"str_ric_{riga['id_comodato']}")
+                                        if stringa_incollata_ric.startswith("data:image/png;base64,"):
+                                            firma_ric_finale = stringa_incollata_ric
+                                            st.success("✅ Firma pronta per lo scarico logistico!")
+                                    else:
+                                        file_firma_ric = st.file_uploader("Carica immagine firma:", type=["png", "jpg", "jpeg"], key=f"upload_ric_{riga['id_comodato']}")
+                                        if file_firma_ric is not None:
+                                            firma_ric_finale = "data:image/png;base64," + base64.b64encode(file_firma_ric.read()).decode("utf-8")
+                                            st.success("✅ Immagine firma caricata!")
+                                    
+                                    if st.button("Riconsegna ed Archivia ↩", key=f"btn_ric_{riga['id_comodato']}", type="primary", use_container_width=True):
+                                        if not firma_ric_finale:
+                                            st.error("La firma è obbligatoria per convalidare la ricevuta di riconsegna.")
+                                        else:
+                                            with st.spinner("Salvataggio e chiusura contratto..."):
+                                                data_rientro = datetime.now().strftime("%d/%m/%Y %H:%M")
+                                                pdf_rientro_bytes = genera_pdf_comodato(riga['id_comodato'], riga['nominativo'], riga['tipo_soggetto'], riga['id_bene'], data_rientro, "RICONSEGNA", firma_ric_finale, utente_loggato=st.session_state.utente_corrente)
+                                                
+                                                if carica_su_drive_unico(pdf_rientro_bytes, f"Ricevuta_Riconsegna_{riga['id_comodato']}.pdf", "application/pdf", "Comodati_Riconsegne"):
+                                                    df_reg_comodati.loc[df_reg_comodati["id_comodato"].astype(str) == str(riga["id_comodato"]), "stato_comodato"] = f"Riconsegnato il {data_rientro}"
+                                                    carica_su_sheet(df_reg_comodati, "Registro_Comodati")
+                                                    
+                                                    df_inv_comodati.loc[df_inv_comodati["id_bene"] == riga["id_bene"], "stato"] = "Disponibile"
+                                                    carica_su_sheet(df_inv_comodati, "Inventario_Comodati")
+                                                    st.success("Bene rientrato a magazzino!")
+                                                    st.rerun()
+                                                else:
+                                                    st.error("Errore nell'invio del PDF su Google Drive.")
+
+    # --- INTERFACCIA COLLABORATORI ---
     elif st.session_state.ruolo_utente == "collaboratore":
         st.markdown("### Nuova Richiesta Materiali")
         st.info("Area Richieste allineata ed attiva.")
