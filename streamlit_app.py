@@ -120,55 +120,74 @@ def carica_su_sheet(df, nome_scheda):
         worksheet.update(valori)
     except Exception: pass
 
-# --- GENERAZIONE PDF BASATO SU MODELLO MINISTERIALE (RISOLTO UNICODE EXCEPTION) ---
+
+# --- CLASSE PDF OTTIMIZZATA PER PAGINA SINGOLA ---
+class PDFMinisteriale(FPDF):
+    def footer(self):
+        # Il footer viene posizionato automaticamente a 20mm dal fondo senza intaccare il flusso
+        self.set_y(-20)
+        self.set_draw_color(180, 180, 180)
+        self.set_line_width(0.1)
+        self.line(15, self.get_y(), 195, self.get_y())
+        
+        self.set_font("Arial", "", 7)
+        self.cell(180, 4, 'ISISS "A. SCARPA"      Via Primo Maggio, 3 31045 Motta di Livenza (Tv)      C.F. 94071460268      Codice univoco UFOA6X', ln=True, align="C")
+        self.cell(180, 3, "tvis01100a@istruzione.it      tvis01100a@pec.istruzione.it", ln=True, align="C")
+        
+        self.set_font("Arial", "I", 5)
+        self.cell(180, 3, "Documento informatico firmato digitalmente ai sensi del D.Lgs 82/2005 CAD art.45, ss.mm.ii e norme collegate.", ln=True, align="C")
+
+
+# --- GENERAZIONE PDF COMPATTA (RISOLTO PROBLEMA SECONDA PAGINA) ---
 def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione, firma_base64=None, utente_loggato="Ufficio Tecnico"):
     if not FPDF_AVAILABLE:
         return b"Errore libreria PDF"
     
-    pdf = FPDF(orientation='P', unit='mm', format='A4')
-    pdf.set_margins(15, 15, 15)
+    # Inizializziamo la classe personalizzata con i margini ottimizzati
+    pdf = PDFMinisteriale(orientation='P', unit='mm', format='A4')
+    pdf.set_margins(15, 12, 15)
+    pdf.set_auto_page_break(auto=True, margin=25) 
     pdf.add_page()
-    pdf.set_auto_page_break(auto=True, margin=35)
     
     # 1. Intestazione Istituzionale
     try:
-        pdf.image(URL_LOGO, x=15, y=12, w=180)
-        pdf.ln(22)
+        pdf.image(URL_LOGO, x=15, y=10, w=180)
+        pdf.ln(18)
     except Exception:
-        pdf.set_font("Times", "B", 14)
+        pdf.set_font("Times", "B", 13)
         pdf.cell(180, 6, "ISISS ANTONIO SCARPA", ln=True, align="C")
-        pdf.ln(10)
+        pdf.ln(8)
         
     # 2. Segnatura / Protocollo e Data locale
-    pdf.set_font("Times", "", 11)
+    pdf.set_font("Times", "", 10)
     data_corrente = data.split(" ")[0] if " " in data else data
     
-    pdf.cell(90, 6, "Protocollo n. (vedi segnatura)", ln=False, align="L")
-    pdf.cell(90, 6, f"Motta di Livenza, {data_corrente}", ln=True, align="R")
-    pdf.ln(4)
+    pdf.cell(90, 5, "Protocollo n. (vedi segnatura)", ln=False, align="L")
+    pdf.cell(90, 5, f"Motta di Livenza, {data_corrente}", ln=True, align="R")
+    pdf.ln(3)
     
     # 3. Destinatario
-    pdf.set_font("Times", "B", 11)
-    pdf.cell(90, 6, "", ln=False)
-    pdf.cell(90, 6, "Ai Docenti / Al Personale Interessato", ln=True, align="L")
-    pdf.cell(90, 6, "", ln=False)
-    pdf.cell(90, 6, f"Sig./Sigg. {nome} ({ruolo})", ln=True, align="L")
-    pdf.ln(8)
+    pdf.set_font("Times", "B", 10)
+    pdf.cell(95, 5, "", ln=False)
+    pdf.cell(85, 5, "Ai Docenti / Al Personale Interessato", ln=True, align="L")
+    pdf.cell(95, 5, "", ln=False)
+    pdf.cell(85, 5, f"Sig./Sigg. {nome} ({ruolo})", ln=True, align="L")
+    pdf.ln(6)
     
     # 4. Oggetto Strutturato
-    pdf.set_font("Times", "B", 11)
-    pdf.cell(25, 6, "OGGETTO: ", ln=False)
-    pdf.set_font("Times", "", 11)
+    pdf.set_font("Times", "B", 10)
+    pdf.cell(22, 5, "OGGETTO: ", ln=False)
+    pdf.set_font("Times", "", 10)
     
     if tipo_operazione == "CONSEGNA":
         testo_oggetto = f"Verbale di Consegna e Assegnazione in Comodato d'Uso Gratuito dei Beni d'Istituto - Registro ID {id_contratto}."
     else:
         testo_oggetto = f"Ricevuta di Riconsegna, Scarico Logistico e Cessazione Comodato d'Uso - Registro ID {id_contratto}."
-    pdf.multi_cell(155, 6, testo_oggetto)
-    pdf.ln(6)
+    pdf.multi_cell(158, 5, testo_oggetto)
+    pdf.ln(4)
     
-    # 5. Corpo del Testo (Sostituiti i caratteri speciali non-ASCII per evitare l'errore FPDFUnicode)
-    pdf.set_font("Times", "", 11)
+    # 5. Corpo del Testo (Spaziature interlinea regolate a 5.5mm per massima compattezza)
+    pdf.set_font("Times", "", 10)
     
     if tipo_operazione == "CONSEGNA":
         corpo_testo = (
@@ -191,20 +210,20 @@ def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione, 
             f"l'operazione di scarico logistico dal registro dei comodati attivi."
         )
         
-    pdf.multi_cell(180, 6, corpo_testo, align="J")
-    pdf.ln(15)
+    pdf.multi_cell(180, 5.5, corpo_testo, align="J")
+    pdf.ln(8)
     
-    # 6. Blocco Firme Allineato (Risolta la sovrapposizione)
-    pdf.set_font("Times", "B", 11)
+    # 6. Blocco Firme Ottimizzato
+    pdf.set_font("Times", "B", 10)
     y_posizione_firme = pdf.get_y()
     
-    pdf.cell(100, 6, "Per l'Amministrazione:", align="L")
-    pdf.cell(80, 6, "Firma del Richiedente:", align="L", ln=True)
+    pdf.cell(100, 5, "Per l'Amministrazione:", align="L")
+    pdf.cell(80, 5, "Firma del Richiedente:", align="L", ln=True)
     
-    pdf.set_font("Times", "I", 10)
-    pdf.cell(100, 6, "RESP. Ufficio Tecnico", align="L")
+    pdf.set_font("Times", "I", 9)
+    pdf.cell(100, 5, "RESP. Ufficio Tecnico", align="L")
     
-    # Inserimento controllato della firma grafica sulla destra
+    # Inserimento controllato e scalato della firma (w=42, h=11 per non sforare mai)
     if firma_base64 and len(firma_base64) > 100:
         try:
             dati_f = firma_base64.split(",")[1] if "," in firma_base64 else firma_base64
@@ -215,28 +234,14 @@ def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione, 
             sfondo_bianco.paste(img_originale, (0, 0), img_originale)
             
             img_buffer = io.BytesIO()
-            sfondo_bianco.convert("RGB").save(img_buffer, format="JPEG", quality=95)
+            sfondo_bianco.convert("RGB").save(img_buffer, format="JPEG", quality=90)
             img_buffer.seek(0)
             
-            # Posizionata stabilmente a destra (x=115) e leggermente distanziata in basso (y + 7)
-            pdf.image(img_buffer, x=115, y=y_posizione_firme + 7, w=50, h=14)
+            pdf.image(img_buffer, x=115, y=y_posizione_firme + 5, w=42, h=11)
         except Exception:
-            pdf.cell(80, 6, "[Firma Digitale Acquisita]", align="L", ln=True)
+            pdf.cell(80, 5, "[Firma Digitale Acquisita]", align="L", ln=True)
     else:
-        pdf.cell(80, 6, "____________________________", align="L", ln=True)
-        
-    # 7. FOOTER MINISTERIALE LOGISTICO FISSO
-    pdf.set_y(260)
-    pdf.set_draw_color(180, 180, 180)
-    pdf.set_line_width(0.1)
-    pdf.line(15, 260, 195, 260)
-    
-    pdf.set_font("Arial", "", 7)
-    pdf.cell(180, 4, "ISISS \"A. SCARPA\"      Via Primo Maggio, 3 31045 Motta di Livenza (Tv)      C.F. 94071460268      Codice univoco UFOA6X", ln=True, align="C")
-    pdf.cell(180, 3, "tvis01100a@istruzione.it      tvis01100a@pec.istruzione.it", ln=True, align="C")
-    
-    pdf.set_font("Arial", "I", 5)
-    pdf.cell(180, 4, "Documento informatico firmato digitalmente ai sensi del D.Lgs 82/2005 CAD art.45, ss.mm.ii e norme collegate.", ln=True, align="C")
+        pdf.cell(80, 5, "____________________________", align="L", ln=True)
 
     return pdf.output()
 
