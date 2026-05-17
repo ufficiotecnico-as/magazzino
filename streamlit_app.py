@@ -5,7 +5,7 @@ import io
 import base64
 from PIL import Image
 
-# Librerie di archiviazione Google (Protette da blocchi di caricamento)
+# Librerie di archiviazione Google
 try:
     import gspread
     from google.oauth2 import service_account
@@ -120,8 +120,8 @@ def carica_su_sheet(df, nome_scheda):
         worksheet.update(valori)
     except Exception: pass
 
-# --- GENERAZIONE PDF CON IMMAGINE FIRMA ACQUISITA ---
-def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione, file_immagine_firma=None, utente_loggato="Ufficio Tecnico"):
+# --- GENERAZIONE PDF CON FIRMA ---
+def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione, firma_base64=None, utente_loggato="Ufficio Tecnico"):
     if not FPDF_AVAILABLE:
         return b"Errore libreria PDF"
     
@@ -152,7 +152,7 @@ def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione, 
     else:
         nota = "Si attesta che il bene sopra descritto è stato riconsegnato in data odierna all'Ufficio Tecnico/Magazzino del Polo Scarpa."
     pdf.multi_cell(190, 6, nota)
-    pdf.ln(15)
+    pdf.ln(20)
     
     pdf.set_font("Arial", "B", 11)
     firma_admin_testo = "Ufficio Tecnico" if str(utente_loggato).lower() in ["admin", "amministratore"] else str(utente_loggato)
@@ -164,16 +164,20 @@ def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione, 
     pdf.set_font("Arial", "I", 10)
     pdf.cell(95, 8, f"F.to {firma_admin_testo}", align="L")
     
-    # Inserisce l'immagine scattata dalla fotocamera direttamente nel file PDF
-    if file_immagine_firma is not None:
+    # Inserimento sicuro dell'immagine della firma decodificata nel PDF
+    if firma_base64 and "," in firma_base64:
         try:
-            img = Image.open(file_immagine_firma)
+            dati_f = firma_base64.split(",")[1]
+            img_data = base64.b64decode(dati_f)
+            img = Image.open(io.BytesIO(img_data))
+            
             img_buffer = io.BytesIO()
             img.convert("RGB").save(img_buffer, format="JPEG")
             img_buffer.seek(0)
-            pdf.image(img_buffer, x=115, y=y_posizione_firme + 6, w=55, h=30)
+            
+            pdf.image(img_buffer, x=115, y=y_posizione_firme + 8, w=65, h=20)
         except Exception:
-            pdf.cell(95, 8, "[Firma Acquisita Otticamente]", align="L", ln=True)
+            pdf.cell(95, 8, "[Firma Digitale Acquisita]", align="L", ln=True)
     else:
         pdf.cell(95, 8, "_______________________", align="L", ln=True)
             
@@ -194,7 +198,7 @@ def carica_su_drive_unico(file_bytes, nome_file, mime_type, nome_cartella_dest):
         
         query = f"name='{nome_cartella_dest}' and '{ID_CARTELLA_DRIVE_PRINCIPALE}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false"
         risultato = service.files().list(q=query, spaces='drive', supportsAllDrives=True, includeItemsFromAllDrives=True).execute()
-        files = risultato.get('files', [])
+        files = resultado.get('files', [])
         
         if files: id_cartella = files[0]['id']
         else:
@@ -282,7 +286,7 @@ else:
                 st.dataframe(df_inv_comodati, use_container_width=True, hide_index=True)
                 
             with sub_nuovo:
-                st.markdown("### Nuovo Accordo di Comodato Istituzionale")
+                st.markdown("### Nuovo Accordo di Comodato")
                 if df_inv_comodati.empty or not (df_inv_comodati["stato"] == "Disponibile").any():
                     st.warning("Nessun bene disponibile al momento.")
                 else:
@@ -294,27 +298,96 @@ else:
                         disp = df_inv_comodati[df_inv_comodati["stato"] == "Disponibile"]["id_bene"].tolist()
                         bene_sel = st.selectbox("Seleziona l'oggetto da consegnare:", disp)
                         
-                    st.markdown("<div style='background-color:#fff3cd; padding:12px; border-radius:8px; border:1px solid #ffeeba; font-size:13px;'><b>Clausola di Custodia:</b> Il richiedente prende in carico l'oggetto integro e funzionante e si impegna a restituirlo nelle medesime condizioni.</div>", unsafe_allow_html=True)
+                    st.markdown("<div style='background-color:#fff3cd; padding:12px; border-radius:8px; border:1px solid #ffeeba; font-size:13px;'><b>Clausola di Custodia:</b> Il firmatario prende in carico l'oggetto integro e si impegna a custodirlo responsabilmente.</div>", unsafe_allow_html=True)
                     
-                    st.markdown("#### 📷 Acquisizione Ottica della Firma (Firma su Carta o Tablet e inquadra):")
+                    st.markdown("#### 🖊️ Apponi la firma nel riquadro bianco:")
                     
-                    # Interfaccia di scatto nativa sicura ed esente da blocchi sandbox browser
-                    foto_firma = st.camera_input("Inquadra la firma autografa sul modulo o sullo schermo:")
+                    # --- INPUT DI TESTO PER RICEVERE LA FIRMA DAL COMPONENTE ---
+                    dati_firma_raw = st.text_input("Dati di validazione firma (Generati automaticamente):", key="valore_firma_str", help="Questo campo si compila da solo appena finisci di disegnare.")
 
-                    if st.button("🚀 Approva, Genera Verbale e Salva su Google Drive", type="primary", use_container_width=True):
+                    # --- COMPONENTE TABLET FIRMA CON AGGANCIO DIRETTO DEI COMPONENTI DI STREAMLIT ---
+                    html_pad_firma = """
+                    <div style="background: #f8fafc; border: 2px dashed #cbd5e1; padding: 15px; border-radius: 12px; max-width:540px;">
+                        <canvas id="canvas_firma" width="500" height="160" style="border:2px solid #64748b; background:#fff; cursor:crosshair; touch-action: none; border-radius:8px;"></canvas>
+                        <br>
+                        <button onclick="pulisciCanvas()" style="margin-top:10px; padding:8px 16px; background:#ef4444; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">Cancella e Riscrivi</button>
+                    </div>
+
+                    <script>
+                        var canvas = document.getElementById('canvas_firma');
+                        var ctx = canvas.getContext('2d');
+                        ctx.strokeStyle = '#000000';
+                        ctx.lineWidth = 3;
+                        ctx.lineCap = 'round';
+                        var isDrawing = false;
+
+                        function getCoordinate(e) {
+                            var rect = canvas.getBoundingClientRect();
+                            if(e.touches && e.touches.length > 0) {
+                                return { x: e.touches[0].clientX - rect.left, y: e.touches[0].clientY - rect.top };
+                            }
+                            return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+                        }
+
+                        function iniziaDisegno(e) { isDrawing = true; var p = getCoordinate(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); e.preventDefault(); }
+                        function disegna(e) { if(!isDrawing) return; var p = getCoordinate(e); ctx.lineTo(p.x, p.y); ctx.stroke(); e.preventDefault(); }
+                        
+                        function fermaDisegno() { 
+                            if(isDrawing) {
+                                isDrawing = false;
+                                spedisciDatiAStreamlit();
+                            }
+                        }
+
+                        canvas.addEventListener('mousedown', iniziaDisegno);
+                        canvas.addEventListener('mousemove', disegna);
+                        canvas.addEventListener('mouseup', fermaDisegno);
+                        canvas.addEventListener('mouseleave', fermaDisegno);
+
+                        canvas.addEventListener('touchstart', iniziaDisegno);
+                        canvas.addEventListener('touchmove', disegna);
+                        canvas.addEventListener('touchend', fermaDisegno);
+
+                        function pulisciCanvas() { 
+                            ctx.clearRect(0, 0, canvas.width, canvas.height); 
+                            aggiornaInputStreamlit("");
+                        }
+
+                        function spedisciDatiAStreamlit() {
+                            var dataUrl = canvas.toDataURL('image/png');
+                            aggiornaInputStreamlit(dataUrl);
+                        }
+
+                        function aggiornaInputStreamlit(valore) {
+                            // Cerca l'input testuale nativo di Streamlit all'interno della pagina principale ed inserisce la stringa base64
+                            var inputs = window.parent.document.querySelectorAll('input[type="text"]');
+                            for (var i = 0; i < inputs.length; i++) {
+                                if (inputs[i].getAttribute('aria-label') && inputs[i].getAttribute('aria-label').includes("Dati di validazione")) {
+                                    inputs[i].value = valore;
+                                    inputs[i].dispatchEvent(new Event('input', { bubbles: true }));
+                                    break;
+                                }
+                            }
+                        }
+                    </script>
+                    """
+                    st.components.v1.html(html_pad_firma, height=240)
+
+                    if st.button("✍️ Approva e Salva PDF su Google Drive", type="primary", use_container_width=True):
                         nome_pulito = st.session_state.input_nome_assegnatario.strip()
+                        firma_acquisita = st.session_state.valore_firma_str.strip()
                         
                         if nome_pulito:
-                            # Validazione foto firma reale
-                            if foto_firma is None:
-                                st.error("⚠️ Attenzione: scatta una foto alla firma prima di salvare il PDF.")
+                            # Controllo bloccante sulla presenza reale della stringa immagine
+                            if not signature_data or len(firma_acquisita) < 500:
+                                st.error("⚠️ Errore di Acquisizione: Non hai firmato nel riquadro bianco o la firma è troppo corta. Riprova.")
                             else:
                                 with st.spinner("Generazione ed upload del documento in corso..."):
                                     id_com = int(df_reg_comodati["id_comodato"].astype(float).max()) + 1 if not df_reg_comodati.empty else 1001
                                     data_ora = datetime.now().strftime("%d/%m/%Y %H:%M")
                                     
-                                    # Genera file PDF passando il file immagine catturato dalla fotocamera
-                                    pdf_output_bytes = genera_pdf_comodato(id_com, nome_pulito, tipo_sog, bene_sel, data_ora, "CONSEGNA", foto_firma, st.session_state.utente_corrente)
+                                    # Genera file PDF passando la stringa Base64 catturata
+                                    pdf_output_bytes = genera_pdf_comodato(id_com, nome_pulito, tipo_sog, bene_sel, data_ora, "CONSEGNA", firma_acquisita, st.session_state.utente_corrente)
                                     nome_file_pdf = f"Verbale_Consegna_{id_com}_{nome_pulito.replace(' ', '_')}.pdf"
                                     
                                     # Carica su Google Drive
@@ -326,10 +399,10 @@ else:
                                         df_inv_comodati.loc[df_inv_comodati["id_bene"] == bene_sel, "stato"] = "Assegnato"
                                         carica_su_sheet(df_inv_comodati, "Inventario_Comodati")
                                         
-                                        st.success(f"🚀 Verbale PDF N°{id_com} archiviato correttamente su Drive!")
+                                        st.success(f"🚀 Verbale PDF N°{id_com} salvato con successo!")
                                         st.rerun()
                                     else:
-                                        st.error("Impossibile caricare su Drive. Verifica i Secrets di sistema.")
+                                        st.error("Impossibile caricare su Drive. Verifica le credenziali cloud.")
                         else:
                             st.error("Inserisci il nome completo dell'assegnatario prima di procedere.")
                             
