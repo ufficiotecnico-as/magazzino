@@ -12,7 +12,7 @@ from email.mime.multipart import MIMEMultipart
 # --- CONFIGURAZIONE PAGINA (Unica, tassativamente all'inizio) ---
 st.set_page_config(page_title="Gestione Magazzini Scarpa", page_icon="🏢", layout="wide")
 
-# --- IMPORTAZIONE SICURA DEL NUOVO MODULO INDEPENDENTE ---
+# --- IMPORTAZIONE SICURA DEL MODULO INDEPENDENTE ---
 try:
     import gestione_preventivi
     from gestione_preventivi import mostra_interfaccia_preventivi
@@ -24,7 +24,7 @@ except Exception:
 URL_INTERMEDIARIO_SILENZIOSO = "https://script.google.com/macros/s/AKfycbyXBLjDpJrSGHoUpuspTsNAG9f6lGhF1e8oGyJ8nkY6jZMTJo04zsT_6eLyEybGgv4/exec"
 ID_CARTELLA_CONSEGNE = "1pJpYtIfcMEKFh62rSOGTXWYG8CgvzN4m"
 ID_CARTELLA_RICONSEGNE = "1S6IcauDOc-8sFiCdGv67CHKf_H9u7BVW"
-ID_CARTELLA_ORDINI = "1bVTs2smvVJONs2oIAFZdDvX9pYDK9MZT"  # Cartella d'archiviazione Lettere d'Ordine
+ID_CARTELLA_ORDINI = "1bVTs2smvVJONs2oIAFZdDvX9pYDK9MZT"  
 SPREADSHEET_ID = "1Q91H_TULvpsnPcyOwQ1lxmjOf809xp4cUz9p1EdMc-4"
 ID_CARTELLA_DRIVE_PRINCIPALE = "1bVTs2smvVJONs2oIAFZdDvX9pYDK9MZT"
 URL_LOGO = "https://cspace.spaggiari.eu//pub/TVII0004/TVII0004-intestazione-nuova-senzaloghi.png?_t=1712923868"
@@ -98,7 +98,7 @@ def scarica_da_sheet(nome_scheda):
         elif "Registro_Preventivi" in nome_scheda:
             df_base = pd.DataFrame(columns=["id_preventivo", "id_richiesta_mag", "fornitore", "importo_ivato", "data_inserimento", "stato_approvazione", "note", "cig", "determina"])
         elif "Anagrafica_Fornitori" in nome_scheda:
-            df_base = pd.DataFrame(columns=["id_fornitore", "ragione_sociale", "partita_iva", "email_contatto"])
+            df_base = pd.DataFrame(columns=["id_fornitore", "ragione_sociale", "partita_iva", "indirizzo", "email_contatto"])
         else:
             df_base = pd.DataFrame(columns=["id", "elemento", "valore"])
         carica_su_sheet(df_base, nome_scheda)
@@ -201,7 +201,7 @@ def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione="
     pdf.set_font("Times", "", 11)
     if tipo_operazione.lower() == "consegna":
         corpo = (f"Con la presente si attesta la formale consegna in comodato d'uso del bene "
-                 f"d'Istituto (Identificativo Bene: {bene}) a favore di {nome}. Chi riceve il bene "
+                 f"d'Istituto (Identificativo Bene: {bene}) a favor di {nome}. Chi riceve il bene "
                  f"costituisce parte custode e responsabile dell'oggetto integro, impegnandosi a conservarlo "
                  f"con la massima cura e la dovuta diligenza professionale.")
     else:
@@ -239,7 +239,7 @@ def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione="
         pdf.text(115, y_f + 10, "____________________________")
     return pdf.output()
 
-# --- COSTRUZIONE DELLA LETTERA D'ORDINE BASATA SUL TUO HTML ---
+# --- LETTERA D'ORDINE ---
 def genera_pdf_ordine_fornitore(dati_ordine):
     if not FPDF_AVAILABLE: return b"Errore PDF"
     pdf = PDFMinisteriale()
@@ -282,7 +282,6 @@ def genera_pdf_ordine_fornitore(dati_ordine):
     pdf.multi_cell(180, 6, pulisci_caratteri_fpdf(testo_rif))
     pdf.ln(8)
     
-    # Tabella beni ordinati
     pdf.set_font("Times", "B", 10)
     pdf.cell(110, 7, pulisci_caratteri_fpdf("Descrizione"), border=1, ln=False, align="L")
     pdf.cell(25, 7, pulisci_caratteri_fpdf("Q.tà"), border=1, ln=False, align="C")
@@ -365,7 +364,7 @@ def mostra_pad_firma(chiave_id):
     """
     st.components.v1.html(html_pad, height=230)
 
-# --- REINDIRIZZAMENTO E STRUTTURA CONTRO LO SFARFALLIO ---
+# --- REINDIRIZZAMENTO ---
 query_params = st.query_params
 if "action" in query_params and "id" in query_params:
     azione = query_params["action"]
@@ -378,7 +377,7 @@ if "action" in query_params and "id" in query_params:
             idx = idx_lista[0]
             if df_f.at[idx, "stato"] == "In attesa di approvazione":
                 nuovo_stato = "In lavorazione" if (azione == "approve" and df_f.at[idx, "categoria_bene"] == "PC Notebook") else ("Lavorata" if azione == "approve" else "Rifiutata")
-                df_f.at[idx, "stato"] = nuevo_stato
+                df_f.at[idx, "stato"] = nuovo_stato
                 carica_su_sheet(df_f, "Richieste_Preside")
                 if azione == "approve":
                     invia_notifica_approvata_preside(id_req, df_f.at[idx, "email_utente"], df_f.at[idx, "oggetto"], df_f.at[idx, "categoria_bene"])
@@ -412,7 +411,7 @@ if st.session_state.ruolo_utente is None:
                     if nome.strip() and email_ut.strip():
                         st.session_state.ruolo_utente = "collaboratore"
                         st.session_state.utente_corrente = nome.strip()
-                        st.session_state.ruolo_specifico = ruolo
+                        st.session_state.ruolo_specifico = rupture
                         st.session_state.email_utente = email_ut.strip()
                         st.rerun()
                     else: st.error("Compila tutti i campi.")
@@ -576,13 +575,12 @@ else:
 
         elif sezione_selezionata == "📊 Gestione Preventivi e Fornitori":
             if MODULO_PREVENTIVI_DISPONIBILE:
-                # Iniettiamo anche la funzione di generazione documento d'acquisto nell'interfaccia moduli
                 mostra_interfaccia_preventivi(scarica_da_sheet, carica_su_sheet, invia_email_sistema, URL_INTERMEDIARIO_SILENZIOSO, df_istanze, genera_pdf_ordine_fornitore, carica_su_drive_unico, ID_CARTELLA_ORDINI)
             else:
                 st.info("ℹ️ Il modulo preventivi è configurato, ma il file `gestione_preventivi.py` non è ancora stato creato.")
 
     # ==========================================
-    # WORKFLOW INTERNO: OPERATORI MAGAZZINI STANDARD (ATA / OFFICINA)
+    # WORKFLOW INTERNO: OPERATORI MAGAZZINI STANDARD
     # ==========================================
     elif st.session_state.ruolo_utente == "magazziniere":
         st.markdown(f"## 📦 Magazzino Fisico: {st.session_state.magazzino_selezionato}")
