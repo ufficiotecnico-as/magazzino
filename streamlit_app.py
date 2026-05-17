@@ -353,7 +353,7 @@ else:
                     if st.form_submit_button("Aggiungi all'Inventario", use_container_width=True):
                         if id_b.strip() and desc_b.strip():
                             nuovo_b = pd.DataFrame([{"id_bene": id_b.strip(), "tipo_bene": tipo_b, "descrizione": desc_b.strip(), "stato": "Disponibile"}])
-                            df_inv_comodati = pd.concat([df_inv_comodati, नया_b], ignore_index=True)
+                            df_inv_comodati = pd.concat([df_inv_comodati, nuovo_b], ignore_index=True)
                             carica_su_sheet(df_inv_comodati, "Inventario_Comodati")
                             st.success("Bene inserito!")
                             st.rerun()
@@ -376,7 +376,7 @@ else:
                     
                     st.markdown("#### 🖊️ Acquisizione Firma Digitale (Consegna):")
                     
-                    # Pad HTML5 nativo con comunicazione real-time a Streamlit via postMessage
+                    # Pad HTML5 nativo con comunicazione immediata a Streamlit
                     html_pad_consegna = """
                     <div style="background: #ffffff; border: 2px dashed #cbd5e1; padding: 10px; border-radius: 8px; max-width:470px;">
                         <canvas id="canvas_consegna" width="450" height="150" style="border:1px solid #64748b; background:#ffffff; cursor:crosshair; touch-action: none; border-radius:4px;"></canvas>
@@ -467,12 +467,12 @@ else:
                                 with st.expander("Esegui Riconsegna / Scarico ↩"):
                                     st.markdown("**✍️ Firma per la Riconsegna:**")
                                     
-                                    # Pad HTML5 di riconsegna con identificativo dinamico per evitare conflitti logici
+                                    # Pad HTML5 di riconsegna con identificativo dinamico corretto
                                     html_pad_ric = f"""
                                     <div style="background: #ffffff; border: 2px dashed #cbd5e1; padding: 10px; border-radius: 8px; max-width:320px;">
                                         <canvas id="canvas_ric_{riga['id_comodato']}" width="300" height="120" style="border:1px solid #64748b; background:#ffffff; cursor:crosshair; touch-action: none; border-radius:4px;"></canvas>
                                         <div style="margin-top:5px; text-align: right;">
-                                            <button type="button" onclick="pulisciRic()" style="padding:4px 10px; background:#ef4444; color:white; border:none; border-radius:4px; cursor:pointer; font-size:11px; font-weight:bold;">Cancella</button>
+                                            <button type="button" onclick="pulisciRic_{riga['id_comodato']}()" style="padding:4px 10px; background:#ef4444; color:white; border:none; border-radius:4px; cursor:pointer; font-size:11px; font-weight:bold;">Cancella</button>
                                         </div>
                                     </div>
 
@@ -505,7 +505,7 @@ else:
                                         canvas.addEventListener('touchmove', function(e) {{ if(!isDrawing) return; var p = getCoord(e); ctx.lineTo(p.x, p.y); ctx.stroke(); e.preventDefault(); }}, {{passive: false}});
                                         canvas.addEventListener('touchend', function() {{ isDrawing = false; inviaAStreamlit(); }});
 
-                                        function pulisciRic() {{ 
+                                        function pulisciRic_{riga['id_comodato']}() {{ 
                                             ctx.clearRect(0, 0, canvas.width, canvas.height);
                                             window.parent.postMessage({{type: 'streamlit:setComponentValue', value: ''}}, '*');
                                         }}
