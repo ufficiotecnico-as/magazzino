@@ -492,7 +492,7 @@ else:
                     "📦 Giacenza dei Magazzini",
                     "📋 Richieste Personale ATA",
                     "🔄 Gestione Comodati d'Uso",
-                    "📊 Gestione Preventivi e Fornitori"  # <-- VOCE INTEGRATA CON SUCCESSO
+                    "📊 Gestione Preventivi e Fornitori"
                 ]
             )
             st.divider()
