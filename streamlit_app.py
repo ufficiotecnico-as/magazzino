@@ -120,60 +120,104 @@ def carica_su_sheet(df, nome_scheda):
         worksheet.update(valori)
     except Exception: pass
 
-# --- GENERAZIONE PDF CON RIMOZIONE DELLO SFONDO TRASPARENTE (EVITA IL QUADRATO NERO) ---
+# --- GENERAZIONE PDF BASATO SU MODELLO MINISTERIALE ---
 def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione, firma_base64=None, utente_loggato="Ufficio Tecnico"):
     if not FPDF_AVAILABLE:
         return b"Errore libreria PDF"
     
-    pdf = FPDF()
+    # Inizializzazione PDF A4 standard (Margin: 15mm)
+    pdf = FPDF(orientation='P', unit='mm', format='A4')
+    pdf.set_margins(15, 15, 15)
     pdf.add_page()
-    pdf.set_font("Arial", "B", 16)
+    pdf.set_auto_page_break(auto=True, margin=35) # Spazio per il footer ministeriale
     
-    pdf.cell(190, 10, "ISTITUTO SUPERIORE ANTONIO SCARPA", ln=True, align="C")
-    pdf.set_font("Arial", "", 12)
-    pdf.cell(190, 10, "Piattaforma di Gestione Logistica e Comodati d'Uso", ln=True, align="C")
-    pdf.ln(10)
+    # 1. Intestazione Istituzionale (Immagine Intestazione Nuova)
+    try:
+        pdf.image(URL_LOGO, x=15, y=12, w=180)
+        pdf.ln(22)
+    except Exception:
+        pdf.set_font("Times", "B", 14)
+        pdf.cell(180, 6, "ISTITUTO D'ISTRUZIONE SUPERIORE STATALE ANTONIO SCARPA", ln=True, align="C")
+        pdf.ln(10)
+        
+    # 2. Segnatura / Protocollo e Data locale
+    pdf.set_font("Times", "", 11)
+    data_corrente = data.split(" ")[0] if " " in data else data
     
-    pdf.set_font("Arial", "B", 14)
-    titolo = "VERBALE DI CONSEGNA IN COMODATO D'USO" if tipo_operazione == "CONSEGNA" else "RICEVUTA DI RICONSEGNA BENI"
-    pdf.cell(190, 10, titolo, ln=True, align="L")
-    pdf.ln(5)
+    pos_y_protocollo = pdf.get_y()
+    pdf.cell(90, 6, "Protocollo n. (vedi segnatura)", ln=False, align="L")
+    pdf.cell(90, 6, f"Motta di Livenza, {data_corrente}", ln=True, align="R")
+    pdf.ln(4)
     
-    pdf.set_font("Arial", "", 11)
-    pdf.cell(190, 8, f"Codice Registro: {id_contratto}", ln=True)
-    pdf.cell(190, 8, f"Data Operazione: {data}", ln=True)
-    pdf.cell(190, 8, f"Assegnatario / Beneficiario: {nome} ({ruolo})", ln=True)
-    pdf.cell(190, 8, f"Bene Associato (ID/Modello): {bene}", ln=True)
-    pdf.ln(10)
+    # 3. Destinatario (Allineamento a Destra come da modello)
+    pdf.set_font("Times", "B", 11)
+    pdf.cell(90, 6, "", ln=False)
+    pdf.cell(90, 6, f"Ai Docenti / Al Personale Interessato", ln=True, align="L")
+    pdf.cell(90, 6, "", ln=False)
+    pdf.cell(90, 6, f"Sig./Sigg. {nome} ({ruolo})", ln=True, align="L")
+    pdf.ln(8)
     
-    pdf.set_font("Arial", "I", 10)
+    # 4. Oggetto Strutturato
+    pdf.set_font("Times", "B", 11)
+    pdf.cell(25, 6, "OGGETTO: ", ln=False)
+    pdf.set_font("Times", "", 11)
+    
+    testo_oggetto = ""
     if tipo_operazione == "CONSEGNA":
-        nota = "Il sottoscritto dichiara di ricevere l'oggetto sopra indicato in perfetto stato di funzionamento e si impegna a custodirlo con la massima diligenza, restituendolo su richiesta dell'Istituto."
+        testo_oggetto = f"Verbale di Consegna e Assegnazione in Comodato d'Uso Gratuito dei Beni d'Istituto - Registro ID {id_contratto}."
     else:
-        nota = "Si attesta che il bene sopra descritto è stato riconsegnato in data odierna all'Ufficio Tecnico/Magazzino del Polo Scarpa."
-    pdf.multi_cell(190, 6, nota)
-    pdf.ln(20)
+        testo_oggetto = f"Ricevuta di Riconsegna, Scarico Logistico e Cessazione Comodato d'Uso - Registro ID {id_contratto}."
+    pdf.multi_cell(155, 6, testo_oggetto)
+    pdf.ln(6)
     
-    pdf.set_font("Arial", "B", 11)
-    firma_admin_testo = "Ufficio Tecnico" if str(utente_loggato).lower() in ["admin", "amministratore"] else str(utente_loggato)
+    # 5. Corpo del Testo (Stile Times New Roman, Giustificato)
+    pdf.set_font("Times", "", 11)
     
+    if tipo_operazione == "CONSEGNA":
+        corpo_testo = (
+            f"Con la presente si attesta che in data odierna l'Amministrazione dell'Istituto Superiore "
+            f"'Antonio Scarpa' provvede alla consegna in comodato d'uso del bene sotto specificato al richiedente indicato.\n\n"
+            f"Dettaglio del Bene Assegnato:\n"
+            f"• Identificativo / Seriale: {bene}\n\n"
+            f"Il sottoscritto prende in carico l'oggetto integro, dichiarando di averne verificato il perfetto stato "
+            f"di funzionamento. Si impegna altresì a custodirlo responsabilmente, utilizzarlo esclusivamente per le finalità "
+            f"istituzionali e connesse alle attività didattiche, ed a restituirlo integro alla Direzione al termine del periodo "
+            f"di utilizzo o su esplicita richiesta dell'Istituto."
+        )
+    else:
+        corpo_testo = (
+            f"Con la presente si attesta che il bene sotto descritto è stato formalmente riconsegnato all'Istituto "
+            f"in data odierna, ponendo fine agli obblighi di custodia previsti dal contratto.\n\n"
+            f"Dettaglio del Bene Riconsegnato:\n"
+            f"• Identificativo / Seriale: {bene}\n\n"
+            f"L'Ufficio Tecnico/Magazzino ha verificato l'integrità e lo stato del dispositivo, completandone "
+            f"l'operazione di scarico logistico dal registro dei comodati attivi."
+        )
+        
+    pdf.multi_cell(180, 6, corpo_testo, align="J")
+    pdf.ln(12)
+    
+    # 6. Blocco Firme Allineato e non sovrapposto
+    pdf.set_font("Times", "B", 11)
     y_posizione_firme = pdf.get_y()
-    pdf.cell(95, 8, "Per l'Amministrazione: ", align="L")
-    pdf.cell(95, 8, "Firma del Richiedente: ", align="L", ln=True)
     
-    pdf.set_font("Arial", "I", 10)
-    pdf.cell(95, 8, f"F.to {firma_admin_testo}", align="L")
+    # Etichette di tracciamento
+    pdf.cell(90, 6, "Per l'Amministrazione:", align="L")
+    pdf.cell(90, 6, "Firma del Richiedente per Accettazione:", align="L", ln=True)
     
+    # Nominativi Sotto i Titoli
+    pdf.set_font("Times", "I", 11)
+    firma_admin_testo = "Ufficio Tecnico" if str(utente_loggato).lower() in ["admin", "amministratore"] else str(utente_loggato)
+    pdf.cell(90, 6, f"RESP. {firma_admin_testo.upper()}", align="L")
+    
+    # Gestione Inserimento Immagine Firma senza sovrapposizioni
     if firma_base64 and len(firma_base64) > 100:
         try:
-            if "," in firma_base64:
-                dati_f = firma_base64.split(",")[1]
-            else:
-                dati_f = firma_base64
+            dati_f = firma_base64.split(",")[1] if "," in firma_base64 else firma_base64
             img_data = base64.b64decode(dati_f)
             img_originale = Image.open(io.BytesIO(img_data))
             
-            # SOLUZIONE CRITICA: Crea un canvas bianco per eliminare la trasparenza distruttiva
+            # Canvas bianco anti-quadrato nero
             sfondo_bianco = Image.new("RGBA", img_originale.size, "WHITE")
             sfondo_bianco.paste(img_originale, (0, 0), img_originale)
             
@@ -181,12 +225,29 @@ def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione, 
             sfondo_bianco.convert("RGB").save(img_buffer, format="JPEG", quality=95)
             img_buffer.seek(0)
             
-            pdf.image(img_buffer, x=115, y=y_posizione_firme + 4, w=65, h=20)
+            # Disegnata a destra (x=115), leggermente distanziata sotto il testo dell'etichetta (y_firme + 8)
+            pdf.image(img_buffer, x=115, y=y_posizione_firme + 8, w=55, h=16)
         except Exception:
-            pdf.cell(95, 8, "[Firma Digitale Acquisita]", align="L", ln=True)
+            pdf.cell(90, 6, "[Firma Digitale Acquisita Log]", align="L", ln=True)
     else:
-        pdf.cell(95, 8, "_______________________", align="L", ln=True)
-            
+        pdf.cell(90, 6, "____________________________", align="L", ln=True)
+        
+    # 7. FOOTER MINISTERIALE OBBLIGATORIO (Simulazione Tabella HTML a fondo pagina)
+    # Impostiamo la posizione fissa a fondo pagina (262mm) per evitare fluttuazioni
+    pdf.set_y(260)
+    pdf.set_draw_color(160, 160, 160)
+    pdf.set_line_width(0.1)
+    pdf.line(15, 260, 195, 260) # Riga divisoria superiore del footer
+    
+    # Testo Legale della Scuola (allineamento orizzontale)
+    pdf.set_font("Arial", "", 7)
+    pdf.cell(180, 4, "ISISS \"A. SCARPA\"      Via Primo Maggio, 3 31045 Motta di Livenza (Tv)      C.F. 94071460268      Codice univoco UFOA6X", ln=True, align="C")
+    pdf.cell(180, 3, "E-mail: tvis01100a@istruzione.it      Pec: tvis01100a@pec.istruzione.it      Sito Web: www.isiss-scarpa.edu.it", ln=True, align="C")
+    
+    # Nota di certificazione e sicurezza informatica a fondo pagina
+    pdf.set_font("Arial", "I", 5)
+    pdf.cell(180, 4, "Documento informatico firmato digitalmente ai sensi del D.Lgs 82/2005 CAD art.45, ss.mm.ii e norme collegate.", ln=True, align="C")
+
     return pdf.output()
 
 # --- CARICAMENTO SU DRIVE ROBUSTO ---
@@ -444,3 +505,4 @@ else:
     elif st.session_state.ruolo_utente == "collaboratore":
         st.markdown("### Nuova Richiesta Materiali")
         st.info("Area Richieste allineata ed attiva.")
+        
