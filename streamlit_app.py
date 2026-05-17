@@ -123,6 +123,12 @@ def scarica_da_sheet(nome_scheda):
             df_base = pd.DataFrame(columns=["id_comodato", "tipo_soggetto", "nominativo", "id_bene", "data_consegna", "stato_comodato"])
         elif "Richieste_Preside" in nome_scheda:
             df_base = pd.DataFrame(columns=["id_richiesta", "data_richiesta", "richiedente", "ruolo_richiedente", "email_utente", "tipo_istanza", "categoria_bene", "oggetto", "motivazione", "stato"])
+        elif "Richieste_Preventivo_Magazzino" in nome_scheda:
+            df_base = pd.DataFrame(columns=["id_richiesta_mag", "data_creazione", "magazzino_origine", "materiale_richiesto", "quantita_esimata", "stato_iter", "note"])
+        elif "Registro_Preventivi" in nome_scheda:
+            df_base = pd.DataFrame(columns=["id_preventivo", "id_richiesta_mag", "fornitore", "importo_ivato", "data_inserimento", "stato_approvazione", "note"])
+        elif "Anagrafica_Fornitori" in nome_scheda:
+            df_base = pd.DataFrame(columns=["id_fornitore", "ragione_sociale", "partita_iva", "email_contatto"])
         else:
             df_base = pd.DataFrame(columns=["id", "elemento", "valore"])
         carica_su_sheet(df_base, nome_scheda)
@@ -613,13 +619,17 @@ else:
         # --- SEZIONE 4: GESTIONE PREVENTIVI INTEGRATA ---
         elif sezione_selezionata == "📊 Gestione Preventivi e Fornitori":
             if MODULO_PREVENTIVI_DISPONIBILE:
-                mostra_interfaccia_preventivi(
-                    scarica_da_sheet, 
-                    carica_su_sheet, 
-                    invia_email_sistema, 
-                    URL_INTERMEDIARIO_SILENZIOSO, 
-                    df_istanze
-                )
+                try:
+                    mostra_interfaccia_preventivi(
+                        scarica_da_sheet, 
+                        carica_su_sheet, 
+                        invia_email_sistema, 
+                        URL_INTERMEDIARIO_SILENZIOSO, 
+                        df_istanze
+                    )
+                except Exception as e:
+                    st.error(f"❌ Errore durante l'esecuzione del modulo preventivi: {e}")
+                    st.info("Verifica che il file `gestione_preventivi.py` sia aggiornato alla struttura corretta.")
             else:
                 st.info("ℹ️ Il modulo preventivi è configurato, ma il file `gestione_preventivi.py` non è ancora stato creato o caricato nella cartella.")
 
