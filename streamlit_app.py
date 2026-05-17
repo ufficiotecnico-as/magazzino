@@ -200,7 +200,7 @@ def pulisci_caratteri_fpdf(testo):
     for k, v in mappa.items(): testo = testo.replace(k, v)
     return testo.encode('raw_unicode_escape').decode('utf-8').encode('latin1', 'replace').decode('latin1')
 
-# --- GENERAZIONE PDF INCLUSIVA E PROFESSIONALE SUR LAYOUT MINISTERIALE ---
+# --- GENERAZIONE PDF AGGIORNATA SU TIMING HTML MINISTERILE ---
 def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione="Consegna", firma_base64=None, utente_loggato="Ufficio Tecnico"):
     if not FPDF_AVAILABLE: return b"Errore PDF"
     pdf = PDFMinisteriale()
@@ -221,10 +221,10 @@ def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione="
     pdf.cell(90, 5, pulisci_caratteri_fpdf("Motta di Livenza, (vedi segnatura)"), ln=True, align="R")
     pdf.ln(8)
     
-    # Destinatario dell'atto (Linguaggio neutro e inclusivo)
+    # Destinatario dell'atto
     pdf.set_font("Times", "B", 11)
     pdf.cell(110, 5, "", ln=False)
-    pdf.cell(70, 5, pulisci_caratteri_fpdf(f"Alla componente Docente / al Personale:"), ln=True, align="L")
+    pdf.cell(70, 5, pulisci_caratteri_fpdf(f"Ai Docenti / Al Personale:"), ln=True, align="L")
     pdf.set_font("Times", "", 11)
     pdf.cell(110, 5, "", ln=False)
     pdf.cell(70, 5, pulisci_caratteri_fpdf(f"{nome} ({ruolo})"), ln=True, align="L")
@@ -237,19 +237,19 @@ def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione="
     pdf.multi_cell(156, 5, pulisci_caratteri_fpdf(testo_oggetto))
     pdf.ln(12)
     
-    # Corpo del verbale (Riformulato in ottica di genere ed equità giuridica)
+    # Corpo del verbale in base all'operazione eseguita
     pdf.set_font("Times", "", 11)
     if tipo_operazione.lower() == "consegna":
         corpo = (f"Con la presente si attesta la formale consegna in comodato d'uso del bene "
-                 f"d'Istituto (Identificativo Bene: {bene}) a favore di {nome}. Chi riceve il dispositivo "
-                 f"assume la custodia responsabile dell'oggetto integro, impegnandosi a conservarlo "
-                 f"con la massima cura e diligenza professionale, nonché ad utilizzarlo esclusivamente per le "
+                 f"d'Istituto (Identificativo Bene: {bene}) a favore di {nome}. Il richiedente si "
+                 f"costituisce custode responsabile dell'oggetto integro, impegnandosi a conservarlo "
+                 f"con la diligenza del buon padre di famiglia e ad utilizzarlo esclusivamente per le "
                  f"finalita' e le attivita' istituzionali della scuola.")
     else:
         corpo = (f"Con la presente si attesta la formale riconsegna e il conseguente rientro al magazzino del bene "
                  f"d'Istituto (Identificativo Bene: {bene}) precedentemente concesso in comodato d'uso "
                  f"a {nome}. L'Amministrazione prende in carico il dispositivo verificandone lo stato "
-                 f"di restituzione ai fini del corretto ripristino dell'inventario.")
+                 f"di restituzione ai fini del ripristino dell'inventario.")
                  
     pdf.multi_cell(180, 6, pulisci_caratteri_fpdf(corpo))
     pdf.ln(20)
@@ -263,12 +263,12 @@ def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione="
     nota_cad = "Documento informatico firmato digitalmente ai sensi del D.Lgs 82/2005 CAD art.45, ss.mm.ii e norme collegate."
     pdf.cell(180, 4, pulisci_caratteri_fpdf(nota_cad), ln=True, align="C")
     
-    # Firme operative sul campo (Linguaggio neutro)
+    # Firme operative sul campo
     pdf.set_y(-55)
     y_f = pdf.get_y()
     pdf.set_font("Times", "", 10)
-    pdf.cell(100, 5, pulisci_caratteri_fpdf(f"F.to la parte Amministratrice ({utente_loggato})"))
-    pdf.cell(80, 5, pulisci_caratteri_fpdf(f"Firma della persona richiedente ({tipo_operazione}):"))
+    pdf.cell(100, 5, pulisci_caratteri_fpdf(f"F.to l'Amministratore ({utente_loggato})"))
+    pdf.cell(80, 5, pulisci_caratteri_fpdf(f"Firma del Richiedente ({tipo_operazione}):"))
     
     if firma_base64 and len(firma_base64) > 100:
         try:
@@ -887,7 +887,7 @@ def pulisci_caratteri_fpdf(testo):
     for k, v in mappa.items(): testo = testo.replace(k, v)
     return testo.encode('raw_unicode_escape').decode('utf-8').encode('latin1', 'replace').decode('latin1')
 
-# --- GENERAZIONE PDF INCLUSIVA E PROFESSIONALE SUR LAYOUT MINISTERIALE ---
+# --- GENERAZIONE PDF AGGIORNATA SU TIMING HTML MINISTERILE ---
 def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione="Consegna", firma_base64=None, utente_loggato="Ufficio Tecnico"):
     if not FPDF_AVAILABLE: return b"Errore PDF"
     pdf = PDFMinisteriale()
@@ -908,10 +908,10 @@ def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione="
     pdf.cell(90, 5, pulisci_caratteri_fpdf("Motta di Livenza, (vedi segnatura)"), ln=True, align="R")
     pdf.ln(8)
     
-    # Destinatario dell'atto (Linguaggio neutro e inclusivo)
+    # Destinatario dell'atto
     pdf.set_font("Times", "B", 11)
     pdf.cell(110, 5, "", ln=False)
-    pdf.cell(70, 5, pulisci_caratteri_fpdf(f"Alla componente Docente / al Personale:"), ln=True, align="L")
+    pdf.cell(70, 5, pulisci_caratteri_fpdf(f"Ai Docenti / Al Personale:"), ln=True, align="L")
     pdf.set_font("Times", "", 11)
     pdf.cell(110, 5, "", ln=False)
     pdf.cell(70, 5, pulisci_caratteri_fpdf(f"{nome} ({ruolo})"), ln=True, align="L")
@@ -924,19 +924,19 @@ def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione="
     pdf.multi_cell(156, 5, pulisci_caratteri_fpdf(testo_oggetto))
     pdf.ln(12)
     
-    # Corpo del verbale (Riformulato in ottica di genere ed equità giuridica)
+    # Corpo del verbale in base all'operazione eseguita
     pdf.set_font("Times", "", 11)
     if tipo_operazione.lower() == "consegna":
         corpo = (f"Con la presente si attesta la formale consegna in comodato d'uso del bene "
-                 f"d'Istituto (Identificativo Bene: {bene}) a favore di {nome}. Chi riceve il dispositivo "
-                 f"assume la custodia responsabile dell'oggetto integro, impegnandosi a conservarlo "
-                 f"con la massima cura e diligenza professionale, nonché ad utilizzarlo esclusivamente per le "
+                 f"d'Istituto (Identificativo Bene: {bene}) a favore di {nome}. Il richiedente si "
+                 f"costituisce custode responsabile dell'oggetto integro, impegnandosi a conservarlo "
+                 f"con la diligenza del buon padre di famiglia e ad utilizzarlo esclusivamente per le "
                  f"finalita' e le attivita' istituzionali della scuola.")
     else:
         corpo = (f"Con la presente si attesta la formale riconsegna e il conseguente rientro al magazzino del bene "
                  f"d'Istituto (Identificativo Bene: {bene}) precedentemente concesso in comodato d'uso "
                  f"a {nome}. L'Amministrazione prende in carico il dispositivo verificandone lo stato "
-                 f"di restituzione ai fini del corretto ripristino dell'inventario.")
+                 f"di restituzione ai fini del ripristino dell'inventario.")
                  
     pdf.multi_cell(180, 6, pulisci_caratteri_fpdf(corpo))
     pdf.ln(20)
@@ -950,12 +950,12 @@ def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione="
     nota_cad = "Documento informatico firmato digitalmente ai sensi del D.Lgs 82/2005 CAD art.45, ss.mm.ii e norme collegate."
     pdf.cell(180, 4, pulisci_caratteri_fpdf(nota_cad), ln=True, align="C")
     
-    # Firme operative sul campo (Linguaggio neutro)
+    # Firme operative sul campo
     pdf.set_y(-55)
     y_f = pdf.get_y()
     pdf.set_font("Times", "", 10)
-    pdf.cell(100, 5, pulisci_caratteri_fpdf(f"F.to la parte Amministratrice ({utente_loggato})"))
-    pdf.cell(80, 5, pulisci_caratteri_fpdf(f"Firma della persona richiedente ({tipo_operazione}):"))
+    pdf.cell(100, 5, pulisci_caratteri_fpdf(f"F.to l'Amministratore ({utente_loggato})"))
+    pdf.cell(80, 5, pulisci_caratteri_fpdf(f"Firma del Richiedente ({tipo_operazione}):"))
     
     if firma_base64 and len(firma_base64) > 100:
         try:
