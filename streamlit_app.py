@@ -171,7 +171,7 @@ def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione, 
     pdf.cell(85, 5, f"Sig./Sigg. {nome} ({ruolo})", ln=True, align="L")
     pdf.ln(6)
     
-    # 4. Oggetto
+    # 4. Oggetto (Rimosse tutte le virgolette e gli apostrofi curvi per evitare crash Unicode)
     pdf.set_font("Times", "B", 10)
     pdf.cell(22, 5, "OGGETTO: ", ln=False)
     pdf.set_font("Times", "", 10)
@@ -180,10 +180,12 @@ def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione, 
         testo_oggetto = f"Verbale di Consegna e Assegnazione in Comodato d'Uso Gratuito dei Beni d'Istituto - Registro ID {id_contratto}."
     else:
         testo_oggetto = f"Ricevuta di Riconsegna, Scarico Logistico e Cessazione Comodato d'Uso - Registro ID {id_contratto}."
+    
+    testo_oggetto = testo_oggetto.replace("’", "'").replace("“", '"').replace("”", '"')
     pdf.multi_cell(158, 5, testo_oggetto)
     pdf.ln(4)
     
-    # 5. Corpo
+    # 5. Corpo (Pulito da apostrofi tipografici curvi)
     pdf.set_font("Times", "", 10)
     if tipo_operazione == "CONSEGNA":
         corpo_testo = (
@@ -206,6 +208,7 @@ def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione, 
             f"l'operazione di scarico logistico dal registro dei comodati attivi."
         )
         
+    corpo_testo = corpo_testo.replace("’", "'").replace("“", '"').replace("”", '"')
     pdf.multi_cell(180, 5.5, corpo_testo, align="J")
     pdf.ln(8)
     
@@ -241,7 +244,7 @@ def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione, 
     return pdf.output()
 
 
-# --- COMPONENTE INTERATTIVO DI FIRMA DIRETTI SENZA COPIA-INCOLLA ---
+# --- CORREZIONE CRITICA DEL PAD DI FIRMA (Sintassi JS Ripristinata) ---
 def renderizza_pad_firma(chiave_univoca):
     html_pad_firma = f"""
     <div style="background: #f8fafc; border: 2px dashed #cbd5e1; padding: 12px; border-radius: 12px; max-width:490px; font-family: sans-serif;">
@@ -260,13 +263,13 @@ def renderizza_pad_firma(chiave_univoca):
         ctx.lineCap = 'round';
         var isDrawing = false;
 
-        function getCoordinate(e) {
+        function getCoordinate(e) {{
             var rect = canvas.getBoundingClientRect();
             if(e.touches && e.touches.length > 0) {{
                 return {{ x: e.touches[0].clientX - rect.left, y: e.touches[0].clientY - rect.top }};
             }}
             return {{ x: e.clientX - rect.left, y: e.clientY - rect.top }};
-        }
+        }}
 
         canvas.addEventListener('mousedown', function(e) {{ isDrawing = true; var p = getCoordinate(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); }});
         canvas.addEventListener('mousemove', function(e) {{ if(!isDrawing) return; var p = getCoordinate(e); ctx.lineTo(p.x, p.y); ctx.stroke(); }});
@@ -283,7 +286,6 @@ def renderizza_pad_firma(chiave_univoca):
 
         function salva_{chiave_univoca}() {{
             var dataUrl = canvas.toDataURL('image/png');
-            // Iniezione diretta globale del valore in Streamlit bypassando le caselle di testo esterne
             const campi = window.parent.document.querySelectorAll('textarea');
             campi.forEach(el => {{
                 if(el.ariaLabel && el.ariaLabel.includes('{chiave_univoca}')) {{
