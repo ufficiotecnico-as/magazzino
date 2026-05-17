@@ -137,24 +137,24 @@ class PDFMinisteriale(FPDF):
         self.cell(180, 3, "Documento informatico firmato digitalmente ai sensi del D.Lgs 82/2005 CAD art.45, ss.mm.ii e norme collegate.", ln=True, align="C")
 
 
-# --- GENERAZIONE PDF COMPATTA (Pulita da accenti storti) ---
+# --- GENERAZIONE PDF COMPATTA E EQUILIBRATA ---
 def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione, firma_base64=None, utente_loggato="Ufficio Tecnico"):
     if not FPDF_AVAILABLE:
         return b"Errore libreria PDF"
     
     pdf = PDFMinisteriale(orientation='P', unit='mm', format='A4')
     pdf.set_margins(15, 12, 15)
-    pdf.set_auto_page_break(auto=True, margin=25) 
+    pdf.set_auto_page_break(auto=True, margin=22) 
     pdf.add_page()
     
     # 1. Intestazione Istituzionale
     try:
         pdf.image(URL_LOGO, x=15, y=10, w=180)
-        pdf.ln(18)
+        pdf.ln(12)  
     except Exception:
         pdf.set_font("Times", "B", 13)
         pdf.cell(180, 6, "ISISS ANTONIO SCARPA", ln=True, align="C")
-        pdf.ln(8)
+        pdf.ln(4)
         
     # 2. Segnatura / Protocollo e Data locale
     pdf.set_font("Times", "", 10)
@@ -162,7 +162,7 @@ def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione, 
     
     pdf.cell(90, 5, "Protocollo n. (vedi segnatura)", ln=False, align="L")
     pdf.cell(90, 5, f"Motta di Livenza, {data_corrente}", ln=True, align="R")
-    pdf.ln(3)
+    pdf.ln(4)
     
     # 3. Destinatario
     pdf.set_font("Times", "B", 10)
@@ -170,7 +170,7 @@ def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione, 
     pdf.cell(85, 5, "Ai Docenti / Al Personale Interessato", ln=True, align="L")
     pdf.cell(95, 5, "", ln=False)
     pdf.cell(85, 5, f"Sig./Sigg. {nome} ({ruolo})", ln=True, align="L")
-    pdf.ln(6)
+    pdf.ln(5)
     
     # 4. Oggetto Strutturato
     pdf.set_font("Times", "B", 10)
@@ -182,14 +182,12 @@ def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione, 
     else:
         testo_oggetto = f"Ricevuta di Riconsegna, Scarico Logistico e Cessazione Comodato d'Uso - Registro ID {id_contratto}."
     
-    # Evitiamo crash pulendo caratteri particolari
     testo_oggetto = testo_oggetto.replace("’", "'").replace("“", '"').replace("”", '"')
     pdf.multi_cell(158, 5, testo_oggetto)
-    pdf.ln(4)
+    pdf.ln(5)
     
-    # 5. Corpo del Testo
+    # 5. Corpo del Testo (Interlinea proporzionata)
     pdf.set_font("Times", "", 10)
-    
     if tipo_operazione == "CONSEGNA":
         corpo_testo = (
             f"Con la presente si attesta che in data odierna l'Amministrazione dell'Istituto Superiore "
@@ -212,10 +210,11 @@ def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione, 
         )
         
     corpo_testo = corpo_testo.replace("’", "'").replace("“", '"').replace("”", '"')
-    pdf.multi_cell(180, 5.5, corpo_testo, align="J")
-    pdf.ln(8)
+    pdf.multi_cell(180, 6, corpo_testo, align="J")
     
-    # 6. Blocco Firme Ottimizzato
+    # 6. Blocco Firme ad Ancoraggio Fisso Inferiore (Risolve lo spazio vuoto a metà pagina)
+    pdf.set_y(-65)
+    
     pdf.set_font("Times", "B", 10)
     y_posizione_firme = pdf.get_y()
     
@@ -226,7 +225,7 @@ def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione, 
         pdf.cell(80, 5, "Firma del Riconsegnante:", align="L", ln=True)
     
     pdf.set_font("Times", "I", 9)
-    pdf.cell(100, 5, "RESP. Ufficio Tecnico", align="L")
+    pdf.cell(100, 5, "F.to Ufficio Tecnico", align="L")
     
     if firma_base64 and len(firma_base64) > 100:
         try:
@@ -238,10 +237,11 @@ def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione, 
             sfondo_bianco.paste(img_originale, (0, 0), img_originale)
             
             img_buffer = io.BytesIO()
-            sfondo_bianco.convert("RGB").save(img_buffer, format="JPEG", quality=90)
+            sfondo_bianco.convert("RGB").save(img_buffer, format="JPEG", quality=95)
             img_buffer.seek(0)
             
-            pdf.image(img_buffer, x=115, y=y_posizione_firme + 5, w=42, h=11)
+            # h=0 assicura il calcolo proporzionale automatico della firma senza distorsioni
+            pdf.image(img_buffer, x=115, y=y_posizione_firme + 5, w=50, h=0)
         except Exception:
             pdf.cell(80, 5, "[Firma Digitale Acquisita]", align="L", ln=True)
     else:
@@ -249,7 +249,8 @@ def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione, 
 
     return pdf.output()
 
-# --- CARICAMENTO SU DRIVE ---
+
+# --- FUNZIONE LOGISTICA DRIVE ---
 def carica_su_drive_unico(file_bytes, nome_file, mime_type, nome_cartella_dest):
     if not GOOGLE_DRIVE_AVAILABLE: return None
     creds_info = None
@@ -263,33 +264,32 @@ def carica_su_drive_unico(file_bytes, nome_file, mime_type, nome_cartella_dest):
         service = build('drive', 'v3', credentials=creds)
         
         id_cartella_final = ID_CARTELLA_DRIVE_PRINCIPALE
-        
         try:
             query = f"name='{nome_cartella_dest}' and '{ID_CARTELLA_DRIVE_PRINCIPALE}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false"
             risultato = service.files().list(q=query, spaces='drive', supportsAllDrives=True, includeItemsFromAllDrives=True).execute()
             files = risultato.get('files', [])
-            
             if files: 
                 id_cartella_final = files[0]['id']
             else:
                 meta_cartella = {'name': nome_cartella_dest, 'mimeType': 'application/vnd.google-apps.folder', 'parents': [ID_CARTELLA_DRIVE_PRINCIPALE]}
                 id_cartella_final = service.files().create(body=meta_cartella, fields='id', supportsAllDrives=True).execute().get('id')
-        except Exception:
+        except Exception: 
             id_cartella_final = ID_CARTELLA_DRIVE_PRINCIPALE
             
         meta_file = {'name': nome_file, 'parents': [id_cartella_final]}
         media = MediaIoBaseUpload(io.BytesIO(file_bytes), mimetype=mime_type, resumable=True)
         service.files().create(body=meta_file, media_body=media, fields='id', supportsAllDrives=True).execute()
         return True
-    except Exception:
+    except Exception: 
         return None
+
 
 # Inizializzazione Stati sessione
 if "ruolo_utente" not in st.session_state: st.session_state.ruolo_utente = None
 if "utente_corrente" not in st.session_state: st.session_state.utente_corrente = ""
 if "magazzino_selezionato" not in st.session_state: st.session_state.magazzino_selezionato = None
 
-# Login View
+# --- ROUTER LOGIN ---
 if st.session_state.ruolo_utente is None:
     col_l, col_c, col_r = st.columns([1, 1.8, 1])
     with col_c:
@@ -327,7 +327,7 @@ else:
             
     st.image(URL_LOGO, use_container_width=True)
 
-    # --- MAIN ADMIN INTERFACE ---
+    # --- ACCESSO AMMINISTRATORE ---
     if st.session_state.ruolo_utente == "admin":
         tab_magazzini, tab_comodati = st.tabs(["📊 MAGAZZINI LOGISTICI", "✍️ GESTIONE COMODATI (PC & CHIAVI)"])
         
@@ -483,7 +483,7 @@ else:
                                 st.markdown(f"📦 Oggetto: **{riga['id_bene']}** affidato a **{riga['nominativo']}** ({riga['tipo_soggetto']})")
                                 st.caption(f"Assegnatario il: {riga['data_consegna']} | ID Contratto: {riga['id_comodato']}")
                             with c2:
-                                # Esplosione del modulo di riconsegna per singolo elemento con firma specchiata
+                                # Modulo Riconsegna specchiato e stabile
                                 with st.expander("Esegui Riconsegna ↩"):
                                     st.markdown("#### 🖊️ Acquisizione Firma Digitale (Riconsegna):")
                                     metodo_firma_ric = st.radio("Scegli come apporre la firma per la riconsegna:", ["✍️ Disegna Firma Digitale", "🖼️ Carica immagine"], key=f"metodo_ric_{riga['id_comodato']}")
@@ -491,7 +491,7 @@ else:
                                     firma_ric_finale = ""
                                     
                                     if metodo_firma_ric == "✍️ Disegna Firma Digitale":
-                                        st.caption("Fai il disegno, clicca sul pulsante verde, copia tutto il testo magico e incollalo nel box sotto.")
+                                        st.caption("Fai il disegno nel riquadro, clicca sul pulsante verde, fai triplo click sul codice, copialo e incollalo nel box grigio sotto.")
                                         
                                         html_pad_ric = f"""
                                         <div style="background: #f8fafc; border: 2px dashed #cbd5e1; padding: 15px; border-radius: 12px; max-width:510px; font-family: sans-serif;">
@@ -501,7 +501,7 @@ else:
                                                 <button type="button" onclick="pulisciCanvasRic()" style="padding:8px 15px; background:#ef4444; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">Cancella</button>
                                                 <button type="button" onclick="generaCodiceFirmaRic()" style="padding:8px 15px; background:#22c55e; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">Genera Codice Firma</button>
                                             </div>
-                                            <textarea id="output_b64_ric" style="width:100%; height:50px; margin-top:10px; font-size:10px; color:#334155; border:1px solid #cbd5e1; border-radius:4px; display:none;" readonly></textarea>
+                                            <textarea id="output_b64_ric_{riga['id_comodato']}" style="width:100%; height:50px; margin-top:10px; font-size:10px; color:#334155; border:1px solid #cbd5e1; border-radius:4px; display:none;" readonly></textarea>
                                         </div>
 
                                         <script>
@@ -530,19 +530,19 @@ else:
 
                                             function pulisciCanvasRic() {{ 
                                                 ctx.clearRect(0, 0, canvas.width, canvas.height); 
-                                                document.getElementById('output_b64_ric').style.display = 'none';
+                                                document.getElementById("output_b64_ric_{riga['id_comodato']}").style.display = 'none';
                                             }}
 
                                             function generaCodiceFirmaRic() {{
                                                 var dataUrl = canvas.toDataURL('image/png');
-                                                var txt = document.getElementById('output_b64_ric');
+                                                var txt = document.getElementById("output_b64_ric_{riga['id_comodato']}");
                                                 txt.value = dataUrl;
                                                 txt.style.display = 'block';
                                                 txt.select();
                                             }}
                                         </script>
                                         """
-                                        st.components.v1.html(html_pad_ric, height=250)
+                                        st.components.v1.html(html_pad_ric, height=260)
                                         
                                         stringa_incollata_ric = st.text_area("Incolla qui il Codice Firma di Riconsegna:", value="", key=f"str_ric_{riga['id_comodato']}")
                                         if stringa_incollata_ric.startswith("data:image/png;base64,"):
