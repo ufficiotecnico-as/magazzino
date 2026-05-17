@@ -185,7 +185,7 @@ def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione, 
             
     return pdf.output()
 
-# --- CARICAMENTO SU DRIVE ---
+# --- CARICAMENTO SU DRIVE ROBUSTO ---
 def carica_su_drive_unico(file_bytes, nome_file, mime_type, nome_cartella_dest):
     if not GOOGLE_DRIVE_AVAILABLE: return None
     creds_info = None
@@ -198,16 +198,24 @@ def carica_su_drive_unico(file_bytes, nome_file, mime_type, nome_cartella_dest):
         creds = service_account.Credentials.from_service_account_info(creds_info, scopes=['https://www.googleapis.com/auth/drive'])
         service = build('drive', 'v3', credentials=creds)
         
-        query = f"name='{nome_cartella_dest}' and '{ID_CARTELLA_DRIVE_PRINCIPALE}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false"
-        risultato = service.files().list(q=query, spaces='drive', supportsAllDrives=True, includeItemsFromAllDrives=True).execute()
-        files = resultado.get('files', [])
+        id_cartella_final = ID_CARTELLA_DRIVE_PRINCIPALE
         
-        if files: id_cartella = files[0]['id']
-        else:
-            meta_cartella = {'name': nome_cartella_dest, 'mimeType': 'application/vnd.google-apps.folder', 'parents': [ID_CARTELLA_DRIVE_PRINCIPALE]}
-            id_cartella = service.files().create(body=meta_cartella, fields='id', supportsAllDrives=True).execute().get('id')
+        # Tentativo di organizzazione in sotto-cartelle (se fallisce a causa di diritti limitati, passa oltre)
+        try:
+            query = f"name='{nome_cartella_dest}' and '{ID_CARTELLA_DRIVE_PRINCIPALE}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false"
+            risultato = service.files().list(q=query, spaces='drive', supportsAllDrives=True, includeItemsFromAllDrives=True).execute()
+            files = risultato.get('files', [])
             
-        meta_file = {'name': nome_file, 'parents': [id_cartella]}
+            if files: 
+                id_cartella_final = files[0]['id']
+            else:
+                meta_cartella = {'name': nome_cartella_dest, 'mimeType': 'application/vnd.google-apps.folder', 'parents': [ID_CARTELLA_DRIVE_PRINCIPALE]}
+                id_cartella_final = service.files().create(body=meta_cartella, fields='id', supportsAllDrives=True).execute().get('id')
+        except Exception:
+            # Fallback forzato sulla cartella radice fornita dall'utente in caso di blocco permessi
+            id_cartella_final = ID_CARTELLA_DRIVE_PRINCIPALE
+            
+        meta_file = {'name': nome_file, 'parents': [id_cartella_final]}
         media = MediaIoBaseUpload(io.BytesIO(file_bytes), mimetype=mime_type, resumable=True)
         service.files().create(body=meta_file, media_body=media, fields='id', supportsAllDrives=True).execute()
         return True
@@ -302,17 +310,15 @@ else:
                         
                     st.markdown("<div style='background-color:#fff3cd; padding:12px; border-radius:8px; border:1px solid #ffeeba; font-size:13px;'><b>Clausola di Custodia:</b> Il firmatario prende in carico l'oggetto integro e si impegna a custodirlo responsabilmente.</div>", unsafe_allow_html=True)
                     
-                    st.markdown("#### 🖊️ Acquisizione Firma Digitale Sicura:")
+                    st.markdown("#### 🖊 ... Acquisizione Firma Digitale:");
 
-                    # Metodo 100% cloud-safe: Poiché gli iframe bloccano JS, usiamo il caricamento immagine o una firma testuale certificata
                     metodo_firma = st.radio("Scegli come apporre la firma:", ["✍️ Disegna Firma Digitale (Usa campo sotto)", "🖼️ Carica immagine della firma (Opzionale)"])
                     
                     firma_base64_finale = ""
 
                     if metodo_firma == "✍️ Disegna Firma Digitale (Usa campo sotto)":
-                        st.info("A causa delle restrizioni di sicurezza del browser sui server cloud, copia la stringa generata dal riquadro e incollala nel campo di convalida.")
+                        st.info("Esegui il disegno nel riquadro, clicca sul pulsante verde 'Genera Codice Firma', seleziona tutto il testo magico apparso, copialo ed incollalo nel campo grigio.")
                         
-                        # Questo canvas è indipendente e isolato, mostra la stringa all'utente per incollarla senza saltare l'iframe parent
                         html_pad_firma = """
                         <div style="background: #f8fafc; border: 2px dashed #cbd5e1; padding: 15px; border-radius: 12px; max-width:510px; font-family: sans-serif;">
                             <canvas id="canvas_firma" width="480" height="140" style="border:2px solid #64748b; background:#ffffff; cursor:crosshair; touch-action: none; border-radius:8px;"></canvas>
@@ -322,7 +328,7 @@ else:
                                 <button type="button" onclick="generaCodiceFirma()" style="padding:8px 15px; background:#22c55e; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">Genera Codice Firma</button>
                             </div>
                             <textarea id="output_b64" style="width:100%; height:50px; margin-top:10px; font-size:10px; color:#334155; border:1px solid #cbd5e1; border-radius:4px; display:none;" readonly></textarea>
-                            <p id="msg_copia" style="font-size:12px; color:#b91c1c; font-weight:bold; margin-top:5px; display:none;">Firma Codificata! Seleziona tutto il testo sotto, copialo (Ctrl+C) e incollalo nel campo di testo di Streamlit.</p>
+                            <p id="msg_copia" style="font-size:12px; color:#b91c1c; font-weight:bold; margin-top:5px; display:none;">Firma Codificata! Fai triplo click nella casella sopra, copia tutto il testo (Ctrl+C) e incollalo nel campo Streamlit sotto.</p>
                         </div>
 
                         <script>
@@ -405,7 +411,7 @@ else:
                                     st.success(f"🎉 Successo! Contratto N°{id_com} registrato e PDF archiviato su Drive.")
                                     st.rerun()
                                 else:
-                                    st.error("Errore critico d'archiviazione: Controlla le credenziali o lo spazio disponibile su Google Drive.")
+                                    st.error("Errore critico d'archiviazione: Impossibile scrivere su Google Drive. Verifica che l'account della piattaforma abbia i permessi di modifica per la cartella di destinazione.")
                             
             with sub_registro:
                 st.markdown("### Registro Contratti Attivi")
