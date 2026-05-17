@@ -149,15 +149,22 @@ if "action" in params and "id" in params:
             st.markdown("---")
 
 
-# --- FUNZIONE DI INVIO EMAIL CON PULSANTI DI APPROVAZIONE RAPIDA ---
+# --- FUNZIONE DI INVIO EMAIL CON PULSANTI DI APPROVAZIONE RAPIDA (DINAMICA) ---
 def invia_notifica_email(id_richiesta, richiedente, tipo_istanza, oggetto, motivazione):
     try:
         import smtplib
         from email.mime.text import MIMEText
         from email.mime.multipart import MIMEMultipart
 
-        url_applicazione = "https://magazzino.streamlit.app" 
+        # DETEZIONE DINAMICA DELL'URL COMPLETO PER EVITARE REINDIRIZZAMENTI ERRATI
+        try:
+            host_corrente = st.context.headers.get("host", "magazzino.streamlit.app")
+            protocollo = "http" if "localhost" in host_corrente else "https"
+            url_applicazione = f"{protocollo}://{host_corrente}"
+        except Exception:
+            url_applicazione = "https://magazzino.streamlit.app" 
         
+        # Costruzione dei link interattivi di approvazione/rifiuto
         url_approva = f"{url_applicazione}/?action=approve&id={id_richiesta}"
         url_rifiuta = f"{url_applicazione}/?action=reject&id={id_richiesta}"
 
@@ -314,7 +321,7 @@ def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione, 
             f"Dettaglio del Bene Assegnato:\n"
             f"- Identificativo / Seriale: {bene}\n\n"
             f"Il sottoscritto prende in carico l'oggetto integro, dichiarando di averne verificato il perfetto stato "
-            f"di funzionamento. Si impegna altresi a custodirlo responsabilmente, utilizzarlo esclusivamente per le finalita "
+            f"di funzionamento. Si impegna altresi a custodirlo responsabilmente, utilizzarlo esclusivamente for le finalita "
             f"istituzionali e connesse alle attivita didattiche, ed a restituirlo integro alla Direzione al termine del periodo "
             f"di utilizzo o su esplicita richiesta dell'Istituto."
         )
@@ -664,7 +671,6 @@ else:
                         with st.spinner("Invio e notifica email in corso..."):
                             df_registro = scarica_da_sheet("Richieste_Preside")
                             
-                            # Calcolo sicuro ID con fallback se la colonna è vuota o difettosa
                             try:
                                 id_req_num = pd.to_numeric(df_registro["id_richiesta"], errors='coerce')
                                 nuovo_id_richiesta = int(id_req_num.max()) + 1 if not id_req_num.dropna().empty else 101
@@ -708,7 +714,7 @@ else:
                 
                 if invia_m:
                     if not oggetto_richiesta.strip() or not motivazione_richiesta.strip():
-                        st.error("❌ Compila tutti i campi obbligatori per la fornitura.")
+                        st.error("❌ Compila tutti i campi obbligatori for la fornitura.")
                     else:
                         with st.spinner("Invio e notifica email in corso..."):
                             df_registro = scarica_da_sheet("Richieste_Preside")
