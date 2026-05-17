@@ -27,7 +27,7 @@ try:
 except ImportError:
     FPDF_AVAILABLE = False
 
-# Configurazione iniziale di pagina (Aggiornata per evitare warning)
+# Configurazione iniziale di pagina
 st.set_page_config(page_title="Gestione Magazzini Scarpa", page_icon="🏢", layout="wide")
 
 PASSWORD_MAP = {
@@ -164,7 +164,6 @@ def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione, 
     pdf.set_font("Arial", "I", 10)
     pdf.cell(95, 8, f"F.to {firma_admin_testo}", align="L")
     
-    # Inserimento sicuro dell'immagine della firma decodificata nel PDF
     if firma_base64 and "," in firma_base64:
         try:
             dati_f = firma_base64.split(",")[1]
@@ -300,17 +299,21 @@ else:
                         
                     st.markdown("<div style='background-color:#fff3cd; padding:12px; border-radius:8px; border:1px solid #ffeeba; font-size:13px;'><b>Clausola di Custodia:</b> Il firmatario prende in carico l'oggetto integro e si impegna a custodirlo responsabilmente.</div>", unsafe_allow_html=True)
                     
-                    st.markdown("#### 🖊️ Apponi la firma nel riquadro bianco:")
+                    st.markdown("#### 🖊️ Apponi la firma nel riquadro bianco sottostante:")
                     
-                    # --- INPUT DI TESTO PER RICEVERE LA FIRMA DAL COMPONENTE ---
-                    dati_firma_raw = st.text_input("Dati di validazione firma (Generati automaticamente):", key="valore_firma_str", help="Questo campo si compila da solo appena finisci di disegnare.")
+                    # Input di testo invisibile per la sincronizzazione dei dati JavaScript -> Streamlit
+                    dati_firma_raw = st.text_input(
+                        "Dati di validazione firma (Generati automaticamente):", 
+                        key="valore_firma_str", 
+                        label_visibility="collapsed"
+                    )
 
-                    # --- COMPONENTE TABLET FIRMA CON STANDARDS AGGIORNATI ---
+                    # Pannello HTML nativo per catturare la firma via Canvas grafico
                     html_pad_firma = """
-                    <div style="background: #f8fafc; border: 2px dashed #cbd5e1; padding: 15px; border-radius: 12px; max-width:540px;">
-                        <canvas id="canvas_firma" width="500" height="160" style="border:2px solid #64748b; background:#fff; cursor:crosshair; touch-action: none; border-radius:8px;"></canvas>
+                    <div style="background: #f8fafc; border: 2px dashed #cbd5e1; padding: 15px; border-radius: 12px; max-width:510px;">
+                        <canvas id="canvas_firma" width="480" height="160" style="border:2px solid #64748b; background:#ffffff; cursor:crosshair; touch-action: none; border-radius:8px;"></canvas>
                         <br>
-                        <button onclick="pulisciCanvas()" style="margin-top:10px; padding:8px 16px; background:#ef4444; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">Cancella e Riscrivi</button>
+                        <button type="button" onclick="pulisciCanvas()" style="margin-top:10px; padding:10px 20px; background:#ef4444; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold; font-size:14px;">Cancella e Riscrivi</button>
                     </div>
 
                     <script>
@@ -335,7 +338,16 @@ else:
                         function fermaDisegno() { 
                             if(isDrawing) {
                                 isDrawing = false;
-                                spedisciDatiAStreamlit();
+                                var dataUrl = canvas.toDataURL('image/png');
+                                
+                                var inputs = window.parent.document.querySelectorAll('input[type="text"]');
+                                for (var i = 0; i < inputs.length; i++) {
+                                    if (inputs[i].id && inputs[i].id.includes("valore_firma_str")) {
+                                        inputs[i].value = dataUrl;
+                                        inputs[i].dispatchEvent(new Event('input', { bubbles: true }));
+                                        break;
+                                    }
+                                }
                             }
                         }
 
@@ -344,25 +356,16 @@ else:
                         canvas.addEventListener('mouseup', fermaDisegno);
                         canvas.addEventListener('mouseleave', fermaDisegno);
 
-                        canvas.addEventListener('touchstart', iniziaDisegno);
-                        canvas.addEventListener('touchmove', disegna);
+                        canvas.addEventListener('touchstart', iniziaDisegno, {passive: false});
+                        canvas.addEventListener('touchmove', disegna, {passive: false});
                         canvas.addEventListener('touchend', fermaDisegno);
 
                         function pulisciCanvas() { 
                             ctx.clearRect(0, 0, canvas.width, canvas.height); 
-                            aggiornaInputStreamlit("");
-                        }
-
-                        function spedisciDatiAStreamlit() {
-                            var dataUrl = canvas.toDataURL('image/png');
-                            aggiornaInputStreamlit(dataUrl);
-                        }
-
-                        function aggiornaInputStreamlit(valore) {
                             var inputs = window.parent.document.querySelectorAll('input[type="text"]');
                             for (var i = 0; i < inputs.length; i++) {
-                                if (inputs[i].getAttribute('aria-label') && inputs[i].getAttribute('aria-label').includes("Dati di validazione")) {
-                                    inputs[i].value = valore;
+                                if (inputs[i].id && inputs[i].id.includes("valore_firma_str")) {
+                                    inputs[i].value = "";
                                     inputs[i].dispatchEvent(new Event('input', { bubbles: true }));
                                     break;
                                 }
@@ -370,26 +373,25 @@ else:
                         }
                     </script>
                     """
-                    st.iframe(f"data:text/html;charset=utf-8,{html_pad_firma}", height=240)
+                    
+                    # Rendering sicuro tramite il modulo nativo per caricare la parte grafica senza restrizioni
+                    st.components.v1.html(html_pad_firma, height=250)
 
                     if st.button("✍️ Approva e Salva PDF su Google Drive", type="primary", width="stretch"):
                         nome_pulito = st.session_state.input_nome_assegnatario.strip()
                         firma_acquisita = st.session_state.valore_firma_str.strip()
                         
                         if nome_pulito:
-                            # CORRETTO: Adesso la variabile controllata corrisponde a quella estratta dallo stato sessione
                             if not firma_acquisita or len(firma_acquisita) < 500:
-                                st.error("⚠️ Errore di Acquisizione: Non hai firmato nel riquadro bianco o la firma è troppo corta. Riprova.")
+                                st.error("⚠️ Errore di Acquisizione: Non hai firmato nel riquadro bianco o la firma è incompleta. Riprova.")
                             else:
                                 with st.spinner("Generazione ed upload del documento in corso..."):
                                     id_com = int(df_reg_comodati["id_comodato"].astype(float).max()) + 1 if not df_reg_comodati.empty else 1001
                                     data_ora = datetime.now().strftime("%d/%m/%Y %H:%M")
                                     
-                                    # Genera file PDF passando la stringa Base64 catturata
                                     pdf_output_bytes = genera_pdf_comodato(id_com, nome_pulito, tipo_sog, bene_sel, data_ora, "CONSEGNA", firma_acquisita, st.session_state.utente_corrente)
                                     nome_file_pdf = f"Verbale_Consegna_{id_com}_{nome_pulito.replace(' ', '_')}.pdf"
                                     
-                                    # Carica su Google Drive
                                     if carica_su_drive_unico(pdf_output_bytes, nome_file_pdf, "application/pdf", "Comodati_Consegne"):
                                         nuova_r = pd.DataFrame([{"id_comodato": id_com, "tipo_soggetto": tipo_sog, "nominativo": nome_pulito, "id_bene": bene_sel, "data_consegna": data_ora, "stato_comodato": "In Corso"}])
                                         df_reg_comodati = pd.concat([df_reg_comodati, nuova_r], ignore_index=True)
