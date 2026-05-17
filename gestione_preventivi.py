@@ -3,143 +3,171 @@ import pandas as pd
 from datetime import datetime
 
 def mostra_interfaccia_preventivi(scarica_da_sheet, carica_su_sheet, invia_email_sistema, url_intermediario, df_istanze):
-    st.markdown("## 📊 Hub Ingegnerizzato: Gestione Preventivi e Fornitori")
-    st.markdown("Benvenuto nell'area di monitoraggio economico. Qui puoi associare i preventivi dei fornitori esterni alle richieste approvate dalla Dirigente.")
+    st.markdown("## 📊 Hub Indipendente: Preventivi e Richieste di Acquisto Magazzino")
+    st.markdown("Questa sezione gestisce in modo autonomo le richieste di fornitura generate direttamente dal magazzino e i relativi preventivi associati.")
     
-    # 1. CARICAMENTO DATI SPECIFICI DA GOOGLE SHEETS
-    # Usiamo schede dedicate per i preventivi e l'anagrafica dei fornitori
+    # --- CARICAMENTO REPERTORI COERENTI ---
+    df_richieste_mag = scarica_da_sheet("Richieste_Preventivo_Magazzino")
     df_preventivi = scarica_da_sheet("Registro_Preventivi")
     df_fornitori = scarica_da_sheet("Anagrafica_Fornitori")
     
-    # Se le schede sono nuove o vuote, creiamo una struttura di base coerente
+    # Inizializzazione strutture se vuote
+    if df_richieste_mag.empty:
+        df_richieste_mag = pd.DataFrame(columns=[
+            "id_richiesta_mag", "data_creazione", "magazzino_origine", 
+            "materiale_richiesto", "quantita_esimata", "stato_iter", "note"
+        ])
     if df_preventivi.empty:
         df_preventivi = pd.DataFrame(columns=[
-            "id_preventivo", "id_richiesta", "fornitore", "importo_ivato", 
-            "data_inserimento", "stato_approvazione", "note"
+            "id_preventivo", "id_richiesta_mag", "fornitore", 
+            "importo_ivato", "data_inserimento", "stato_approvazione", "note"
         ])
     if df_fornitori.empty:
-        df_fornitori = pd.DataFrame(columns=["id_fornitore", "ragione_sociale", "partita_iva", "email_contatto"])
-        # Inseriamo un paio di fornitori di esempio per non lasciare il database vuoto
         df_fornitori = pd.DataFrame([
             {"id_fornitore": "F01", "ragione_sociale": "Forniture Scolastiche Rossi Srl", "partita_iva": "01234567890", "email_contatto": "commerciale@rossiforniture.it"},
             {"id_fornitore": "F02", "ragione_sociale": "Informatica & Digitale SpA", "partita_iva": "09876543210", "email_contatto": "info@informaticadigitale.it"}
         ])
         carica_su_sheet(df_fornitori, "Anagrafica_Fornitori")
 
-    # Creazione dei Tab interni per organizzare il lavoro dell'Ufficio Tecnico
-    tab_nuovo, tab_registro, tab_fornitori = st.tabs([
-        "➕ Associa Nuovo Preventivo", 
-        "📜 Registro Preventivi Caricati", 
-        "🏢 Anagrafica Fornitori"
+    # Organizzazione dei pannelli di lavoro
+    tab_crea_richiesta, tab_associa_prev, tab_registro_completo, tab_fornitori = st.tabs([
+        "📦 1. Nuova Richiesta dal Magazzino",
+        "✍️ 2. Associa Preventivo Fornitore",
+        "📜 3. Registro Generale Acquisti",
+        "🏢 4. Anagrafica Fornitori"
     ])
-    
+
     # ==========================================
-    # TAB 1: ASSOCIA NUOVO PREVENTIVO
+    # TAB 1: NUOVA RICHIESTA DAL MAGAZZINO
     # ==========================================
-    with tab_nuovo:
-        st.markdown("### ✍️ Carica Offerta Economica per un'Istanza Approvata")
+    with tab_crea_richiesta:
+        st.markdown("### 🏬 Formula Nuova Richiesta di Approvvigionamento")
+        st.markdown("Inserisci una necessità nata direttamente dalla gestione dei magazzini d'Istituto.")
         
-        # Filtriamo le richieste principali che sono state approvate dalla preside ("Lavorata" o "Assegnata")
-        if not df_istanze.empty:
-            istanze_filtrate = df_istanze[df_istanze["stato"].isin(["Lavorata", "Assegnata", "In lavorazione"])]
-        else:
-            istanze_filtrate = pd.DataFrame()
+        with st.form("form_nuova_richiesta_mag"):
+            mag_orig = st.selectbox("Magazzino richiedente:", ["Personale ATA", "Officina", "Tecnici Informatici", "Ufficio Tecnico Generale"])
+            mat_richiesto = st.text_input("Descrizione Materiale / Bene da acquistare (es. 50 Risme Carta A4):")
+            qta_est = st.text_input("Quantità o Specifiche Tecniche stimate:")
+            note_rich = st.text_area("Note interne o urgenza:")
             
-        if istanze_filtrate.empty:
-            st.info("Al momento non ci sono richieste approvate dalla Dirigente in attesa di preventivo economico.")
+            submit_richiesta = st.form_submit_button("Invia Richiesta al Registro Acquisti", use_container_width=True)
+            
+            if submit_richiesta:
+                if mat_richiesto.strip():
+                    try:
+                        id_r_num = pd.to_numeric(df_richieste_mag["id_richiesta_mag"], errors='coerce')
+                        nuovo_id_rm = int(id_r_num.max()) + 1 if not df_richieste_mag.empty and not id_r_num.dropna().empty else 2001
+                    except Exception:
+                        nuovo_id_rm = 2001
+                        
+                    nuova_r_mag = pd.DataFrame([{
+                        "id_richiesta_mag": nuovo_id_rm,
+                        "data_creazione": datetime.now().strftime("%d/%m/%Y %H:%M"),
+                        "magazzino_origine": mag_orig,
+                        "materiale_richiesto": mat_richiesto.strip(),
+                        "quantita_esimata": qta_est.strip(),
+                        "stato_iter": "In attesa di preventivi",
+                        "note": note_rich.strip()
+                    }])
+                    
+                    df_richieste_mag_agg = pd.concat([df_richieste_mag, nuova_r_mag], ignore_index=True)
+                    carica_su_sheet(df_richieste_mag_agg, "Richieste_Preventivo_Magazzino")
+                    st.success(f"✅ Richiesta interna d'acquisto registrata con ID: {nuovo_id_rm}")
+                    st.rerun()
+                else:
+                    st.error("Il campo 'Descrizione Materiale' è obbligatorio.")
+
+    # ==========================================
+    # TAB 2: ASSOCIA PREVENTIVO FORNITORE
+    # ==========================================
+    with tab_associa_prev:
+        st.markdown("### 💸 Collega Offerta Economica Ricevuta")
+        
+        # Mostriamo solo le richieste create dal magazzino che sono in attesa di offerte
+        richieste_attive = df_richieste_mag[df_richieste_mag["stato_iter"] == "In attesa di preventivi"] if not df_richieste_mag.empty else pd.DataFrame()
+        
+        if richieste_attive.empty:
+            st.info("Nessuna richiesta del magazzino è attualmente scoperta o in attesa di preventivo.")
         else:
-            # Creiamo una lista selettiva per il menu a tendina
-            opzioni_richieste = []
-            mappa_richieste = {}
-            for _, riga in istanze_filtrate.iterrows():
-                label = f"ID {riga['id_richiesta']} - {riga['richiedente']} ({riga['oggetto']})"
-                opzioni_richieste.append(label)
-                mappa_richieste[label] = riga['id_richiesta']
+            opzioni_rm = []
+            mappa_rm = {}
+            for _, riga in richieste_attive.iterrows():
+                label = f"REQ {riga['id_richiesta_mag']} - {riga['magazzino_origine']}: {riga['materiale_richiesto']}"
+                opzioni_rm.append(label)
+                mappa_rm[label] = riga['id_richiesta_mag']
                 
-            richiesta_scelta = st.selectbox("Seleziona la richiesta della scuola associata:", opzioni_richieste)
-            id_richiesta_selezionata = mappa_richieste[richiesta_scelta]
+            richiesta_selezionata = st.selectbox("Seleziona la richiesta del magazzino di riferimento:", opzioni_rm)
+            id_rm_scelto = mappa_rm[richiesta_selezionata]
             
-            # Selezione del fornitore dall'anagrafica
-            lista_fornitori = df_fornitori["ragione_sociale"].tolist() if not df_fornitori.empty else ["Nessun fornitore censito"]
-            fornitore_scelto = st.selectbox("Seleziona il Fornitore che ha emesso il preventivo:", lista_fornitori)
+            lista_f = df_fornitori["ragione_sociale"].tolist() if not df_fornitori.empty else ["Nessun fornitore censito"]
+            fornitore_scelto = st.selectbox("Ditta / Operatore Economico offerente:", lista_f)
             
-            # Form per i dettagli del costo
-            with st.form("form_aggiunta_preventivo"):
+            with st.form("form_collega_preventivo"):
                 col1, col2 = st.columns(2)
                 with col1:
-                    importo = st.number_input("Importo Totale Preventivato (€, IVA inclusa):", min_value=0.0, step=10.0, format="%.2f")
+                    importo = st.number_input("Costo Totale Offerto (€, con IVA):", min_value=0.0, step=10.0, format="%.2f")
                 with col2:
-                    note_preventivo = st.text_input("Note aggiuntive / Riferimento offerta:")
+                    note_p = st.text_input("Riferimento preventivo cartaceo o note:")
                     
-                submit_preventivo = st.form_submit_button("Registra Preventivo nel Sistema", use_container_width=True)
+                submit_p = st.form_submit_button("Abbinate Preventivo alla Richiesta", use_container_width=True)
                 
-                if submit_preventivo:
+                if submit_p:
                     if fornitore_scelto == "Nessun fornitore censito":
-                        st.error("Devi prima aggiungere un fornitore valido nell'apposito Tab Anagrafica.")
+                        st.error("Censisci prima un'azienda nel tab dedicato.")
                     elif importo <= 0:
-                        st.error("L'importo del preventivo deve essere superiore a 0 €.")
+                        st.error("Inserisci un importo valido.")
                     else:
-                        # Calcolo del nuovo ID preventivo progressivo
                         try:
                             id_p_num = pd.to_numeric(df_preventivi["id_preventivo"], errors='coerce')
-                            nuovo_id_p = int(id_p_num.max()) + 1 if not df_preventivi.empty and not id_p_num.dropna().empty else 501
+                            nuovo_id_p = int(id_p_num.max()) + 1 if not df_preventivi.empty and not id_p_num.dropna().empty else 7001
                         except Exception:
-                            nuovo_id_p = 501
+                            nuovo_id_p = 7001
                             
-                        # Costruzione della nuova riga
-                        nuovo_prev_df = pd.DataFrame([{
+                        nuovo_prev = pd.DataFrame([{
                             "id_preventivo": nuovo_id_p,
-                            "id_richiesta": id_richiesta_selezionata,
+                            "id_richiesta_mag": id_rm_scelto,
                             "fornitore": fornitore_scelto,
                             "importo_ivato": f"{importo:.2f}",
                             "data_inserimento": datetime.now().strftime("%d/%m/%Y %H:%M"),
-                            "stato_approvazione": "In attesa di validazione DSGA",
-                            "note": note_preventivo.strip()
+                            "stato_approvazione": "Pronto per validazione Dirigente/DSGA",
+                            "note": note_p.strip()
                         }])
                         
-                        # Aggiornamento dello Sheet su Google Drive
-                        df_preventivi_aggiornato = pd.concat([df_preventivi, nuovo_prev_df], ignore_index=True)
-                        carica_su_sheet(df_preventivi_aggiornato, "Registro_Preventivi")
+                        # Aggiorniamo lo stato della richiesta interna
+                        df_richieste_mag.loc[df_richieste_mag["id_richiesta_mag"].astype(str) == str(id_rm_scelto), "stato_iter"] = "Preventivo Ricevuto"
                         
-                        st.success(f"✅ Preventivo ID {nuovo_id_p} associato con successo alla richiesta ID {id_richiesta_selezionata}!")
+                        carica_su_sheet(pd.concat([df_preventivi, nuovo_prev], ignore_index=True), "Registro_Preventivi")
+                        carica_su_sheet(df_richieste_mag, "Richieste_Preventivo_Magazzino")
+                        
+                        st.success(f"🎉 Preventivo ID {nuovo_id_p} registrato e associato alla richiesta interna REQ {id_rm_scelto}!")
                         st.rerun()
 
     # ==========================================
-    # TAB 2: REGISTRO GENERALE PREVENTIVI
+    # TAB 3: REGISTRO GENERALE ACQUISTI
     # ==========================================
-    with tab_registro:
-        st.markdown("### 📜 Elenco Economico e Stato Pratiche di Acquisto")
-        if df_preventivi.empty:
-            st.info("Nessun preventivo inserito a registro al momento.")
-        else:
-            st.dataframe(df_preventivi, use_container_width=True, hide_index=True)
+    with tab_registro_completo:
+        st.markdown("### 📋 Registro Fabbisogni ed Esiti Economici")
+        st.markdown("#### 🔹 Richieste Interne Generate dai Magazzini")
+        st.dataframe(df_richieste_mag, use_container_width=True, hide_index=True)
+        
+        st.markdown("#### 🔸 Preventivi Economici Ricevuti dalle Ditte")
+        st.dataframe(df_preventivi, use_container_width=True, hide_index=True)
 
     # ==========================================
-    # TAB 3: ANAGRAFICA FORNITORI
+    # TAB 4: ANAGRAFICA FORNITORI
     # ==========================================
     with tab_fornitori:
-        st.markdown("### 🏢 Gestione Aziende ed Operatori Economici Partner")
+        st.markdown("### 🏢 Elenco Ditte Partner Accreditate")
         st.dataframe(df_fornitori, use_container_width=True, hide_index=True)
         
-        with st.expander("➕ Censisci un nuovo Fornitore d'Istituto"):
-            with st.form("form_nuovo_fornitore"):
-                rag_soc = st.text_input("Ragione Sociale Azienda:")
-                p_iva = st.text_input("Partita IVA / Codice Fiscale Azienda:")
-                mail_f = st.text_input("Email o PEC di contatto:")
-                
-                submit_f = st.form_submit_button("Salva Azienda in Anagrafica")
-                if submit_f:
-                    if rag_soc.strip() and p_iva.strip():
-                        id_f_nuovo = f"F{len(df_fornitori) + 1:02d}"
-                        nuovo_f_row = pd.DataFrame([{
-                            "id_fornitore": id_f_nuovo,
-                            "ragione_sociale": rag_soc.strip(),
-                            "partita_iva": p_iva.strip(),
-                            "email_contatto": mail_f.strip()
-                        }])
-                        df_fornitori_aggiornato = pd.concat([df_fornitori, nuovo_f_row], ignore_index=True)
-                        carica_su_sheet(df_fornitori_aggiornato, "Anagrafica_Fornitori")
-                        st.success(f"🏢 Fornitore '{rag_soc.strip()}' inserito correttamente!")
+        with st.expander("➕ Aggiungi un nuovo Fornitore all'Albo"):
+            with st.form("form_f_nuovo"):
+                r_s = st.text_input("Ragione Sociale:")
+                p_i = st.text_input("Partita IVA:")
+                em = st.text_input("Email/PEC:")
+                if st.form_submit_button("Inserisci Azienda"):
+                    if r_s.strip() and p_i.strip():
+                        nuovo_f = pd.DataFrame([{"id_fornitore": f"F{len(df_fornitori)+1:02d}", "ragione_sociale": r_s.strip(), "partita_iva": p_i.strip(), "email_contatto": em.strip()}])
+                        carica_su_sheet(pd.concat([df_fornitori, nuovo_f], ignore_index=True), "Anagrafica_Fornitori")
+                        st.success("Azienda registrata!")
                         st.rerun()
-                    else:
-                        st.error("I campi Ragione Sociale e Partita IVA sono strettamente obbligatori.")
