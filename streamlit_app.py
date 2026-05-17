@@ -626,4 +626,4 @@ else:
                         if st.button("Evadi Ordine ✅", key=f"ev_{idx}"):
                             df_req.loc[idx, "stato"] = "Evaso"
                             carica_su_sheet(df_req, MAPPA_SCHEDE[st.session_state.magazzino_selezionato]["richieste"])
-                            st.rerun()s
+                            st.rerun()
