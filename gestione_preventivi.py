@@ -16,6 +16,12 @@ def mostra_interfaccia_preventivi(scarica_da_sheet, carica_su_sheet, invia_email
     df_preventivi = scarica_da_sheet("Registro_Preventivi")
     df_fornitori = scarica_da_sheet("Anagrafica_Fornitori")
     
+    # Controllo colonne anagrafica obbligatorie
+    colonne_rubrica = ["id_fornitore", "ragione_sociale", "partita_iva", "indirizzo", "email_contatto"]
+    for col in colonne_rubrica:
+        if col not in df_fornitori.columns:
+            df_fornitori[col] = ""
+
     # ---------------------------------------------------------
     # TAB 1: FABBISOGNI
     # ---------------------------------------------------------
@@ -27,7 +33,7 @@ def mostra_interfaccia_preventivi(scarica_da_sheet, carica_su_sheet, invia_email
             st.dataframe(df_fabbisogni, use_container_width=True, hide_index=True)
             
     # ---------------------------------------------------------
-    # TAB 2: NUOVA RUBRICA FORNITORI (Per non reinserirli ogni volta)
+    # TAB 2: RUBRICA ANAGRAFICA FORNITORI
     # ---------------------------------------------------------
     with tab_rubrica:
         st.markdown("### 📙 Gestione Rubrica Fornitori d'Istituto")
@@ -43,27 +49,30 @@ def mostra_interfaccia_preventivi(scarica_da_sheet, carica_su_sheet, invia_email
                     if not rag_soc.strip() or not p_iva.strip():
                         st.error("I campi Ragione Sociale e Partita IVA sono obbligatori per il censimento.")
                     else:
-                        id_forn = 1 if df_fornitori.empty else int(pd.to_numeric(df_fornitori["id_fornitore"], errors='coerce').max()) + 1
+                        id_forn_num = pd.to_numeric(df_fornitori["id_fornitore"], errors='coerce')
+                        id_forn = int(id_forn_num.max() + 1) if not df_fornitori.empty and not id_forn_num.dropna().empty else 1
+                        
                         nuovo_forn_df = pd.DataFrame([{
-                            "id_fornitore": id_forn,
-                            "ragione_sociale": rag_soc.strip(),
-                            "partita_iva": p_iva.strip(),
-                            "indirizzo": indirizzo_completo.strip(),
-                            "email_contatto": email_cont.strip()
+                            "id_fornitore": str(id_forn),
+                            "ragione_sociale": str(rag_soc.strip()),
+                            "partita_iva": str(p_iva.strip()),
+                            "indirizzo": str(indirizzo_completo.strip()),
+                            "email_contatto": str(email_cont.strip())
                         }])
                         df_fornitori = pd.concat([df_fornitori, nuovo_forn_df], ignore_index=True)
                         carica_su_sheet(df_fornitori, "Anagrafica_Fornitori")
                         st.success(f"Ditta '{rag_soc.strip()}' registrata in rubrica!")
                         st.rerun()
                         
-        if df_fornitori.empty:
+        if df_fornitori.empty or len(df_fornitori[df_fornitori["ragione_sociale"] != ""]) == 0:
             st.info("Nessun fornitore salvato in rubrica. Aggiungine uno sopra per evitare di digitarlo a mano.")
         else:
             st.markdown("#### Aziende Censite a Registro")
-            st.dataframe(df_fornitori, use_container_width=True, hide_index=True)
+            # Filtriamo righe vuote di sistema
+            df_fornitori_vis = df_fornitori[df_fornitori["ragione_sociale"] != ""]
+            st.dataframe(df_fornitori_vis, use_container_width=True, hide_index=True)
             
-            # Funzionalità rapida per eliminare un elemento errato
-            elenco_cancellabili = [f"{f['id_fornitore']} - {f['ragione_sociale']}" for _, f in df_fornitori.iterrows()]
+            elenco_cancellabili = [f"{f['id_fornitore']} - {f['ragione_sociale']}" for _, f in df_fornitori_vis.iterrows()]
             da_eliminare = st.selectbox("Seleziona eventuale ditta da rimuovere:", [""] + elenco_cancellabili)
             if da_eliminare and st.button("🗑️ Rimuovi Fornitore Selezionato", type="secondary"):
                 id_da_rim = da_eliminare.split(" - ")[0]
@@ -73,13 +82,15 @@ def mostra_interfaccia_preventivi(scarica_da_sheet, carica_su_sheet, invia_email
                 st.rerun()
 
     # ---------------------------------------------------------
-    # TAB 3: INSERIMENTO PREVENTIVO (MODIFICATO CON MENU RUBRICA)
+    # TAB 3: INSERIMENTO PREVENTIVO CON PRECOMPILAZIONE
     # ---------------------------------------------------------
     with tab_inserimento:
         st.markdown("### Collega un preventivo economico a una richiesta interna")
+        df_fornitori_attivi = df_fornitori[df_fornitori["ragione_sociale"] != ""] if not df_fornitori.empty else pd.DataFrame()
+        
         if df_fabbisogni.empty:
             st.warning("Per inserire un preventivo deve essere presente almeno un fabbisogno aperto.")
-        elif df_fornitori.empty:
+        elif df_fornitori_attivi.empty:
             st.error("⚠️ Non hai ancora fornitori in rubrica! Vai nella scheda '📙 Rubrica Anagrafica Fornitori' e inserisci almeno un'azienda prima di continuare.")
         else:
             lista_fabbisogni = [f"ID {r['id_richiesta_mag']} - {r['materiale_richiesto']} ({r['magazzino_origine']})" for _, r in df_fabbisogni.iterrows()]
@@ -88,25 +99,27 @@ def mostra_interfaccia_preventivi(scarica_da_sheet, carica_su_sheet, invia_email
             
             with st.form("form_aggiunta_preventivo"):
                 st.markdown("##### 🏢 Selezione Fornitore da Rubrica")
-                # Menu a tendina generato dinamicamente dai contatti salvati
-                opzioni_rubrica = [f"{f['ragione_sociale']} (P.IVA: {f['partita_iva']})" for _, f in df_fornitori.iterrows()]
+                
+                opzioni_rubrica = [f"{f['ragione_sociale']} (P.IVA: {f['partita_iva']})" for _, f in df_fornitori_attivi.iterrows()]
                 fornitore_selezionato_rubrica = st.selectbox("Scegli la ditta (prenderà i dati in automatico):", opzioni_rubrica)
                 
                 importo_lordo = st.number_input("Importo Totale IVATO (€):", min_value=0.0, step=0.01)
                 note_preventivo = st.text_area("Note aggiuntive / Condizioni di consegna:")
                 
                 if st.form_submit_button("Registra preventivo a sistema"):
-                    # Recuperiamo l'oggetto corretto del fornitore per formattarlo nel blocco "Spett.le"
-                    idx_f_scelta = df_fornitori.index[[f"{f['ragione_sociale']} (P.IVA: {f['partita_iva']})" == fornitore_selezionato_rubrica for _, f in df_fornitori.iterrows()]].tolist()[0]
-                    f_dati = df_fornitori.iloc[idx_f_scelta]
+                    # Estrazione sicura posizionale basata sulla stringa visualizzata
+                    idx_f_scelta = [f"{f['ragione_sociale']} (P.IVA: {f['partita_iva']})" == fornitore_selezionato_rubrica for _, f in df_fornitori_attivi.iterrows()].index(True)
+                    f_dati = df_fornitori_attivi.iloc[idx_f_scelta]
                     
-                    # Formattiamo la stringa multiline del destinatario esattamente come serve al PDF
+                    # Costruiamo il blocco dell'intestazione per la lettera d'ordine
                     blocco_spett_le = f"{f_dati['ragione_sociale']}\nSede Legale: {f_dati['indirizzo']}\nP.IVA / C.F.: {f_dati['partita_iva']}\nContatto: {f_dati['email_contatto']}"
                     
-                    id_prev_nuovo = 501 if df_preventivi.empty else int(pd.to_numeric(df_preventivi["id_preventivo"], errors='coerce').max()) + 1
+                    id_prev_num = pd.to_numeric(df_preventivi["id_preventivo"], errors='coerce')
+                    id_prev_nuovo = 501 if df_preventivi.empty or id_prev_num.dropna().empty else int(id_prev_num.max()) + 1
+                    
                     nuovo_prev_df = pd.DataFrame([{
-                        "id_preventivo": id_prev_nuovo,
-                        "id_richiesta_mag": id_fabb_scelto,
+                        "id_preventivo": str(id_prev_nuovo),
+                        "id_richiesta_mag": str(id_fabb_scelto),
                         "fornitore": blocco_spett_le,
                         "importo_ivato": f"{importo_lordo:.2f}",
                         "data_inserimento": datetime.now().strftime("%d/%m/%Y %H:%M"),
@@ -116,11 +129,11 @@ def mostra_interfaccia_preventivi(scarica_da_sheet, carica_su_sheet, invia_email
                         "determina": ""
                     }])
                     carica_su_sheet(pd.concat([df_preventivi, nuovo_prev_df], ignore_index=True), "Registro_Preventivi")
-                    st.success(f"Preventivo ID {id_prev_nuovo} salvato! I dati dell'azienda sono stati precompilati dalla rubrica senza doverli scrivere.")
+                    st.success(f"Preventivo ID {id_prev_nuovo} salvato con successo! Nessun inserimento manuale eseguito.")
                     st.rerun()
                         
     # ---------------------------------------------------------
-    # TAB 4: EMISSIONE LETTERA D'ORDINE
+    # TAB 4: EMISSIONE LETTERA D'ORDINE MINISTERI
     # ---------------------------------------------------------
     with tab_registro_finito:
         st.markdown("### Valutazione, Approvazione ed Emissione Lettera d'Ordine")
@@ -202,5 +215,4 @@ def mostra_interfaccia_preventivi(scarica_da_sheet, carica_su_sheet, invia_email
                                 use_container_width=True
                             )
                             st.balloons()
-                            st.info("Aggiornamento interfaccia in corso...")
                             st.rerun()
