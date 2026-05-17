@@ -344,7 +344,7 @@ if st.session_state.ruolo_utente is None:
                     if nome.strip() and email_ut.strip():
                         st.session_state.ruolo_utente = "collaboratore"
                         st.session_state.utente_corrente = nome.strip()
-                        st.session_state.ruolo_specifico = ruolo
+                        st.session_state.ruolo_specifico = suelo
                         st.session_state.email_utente = email_ut.strip()
                         st.rerun()
                     else: st.error("Compila tutti i campi obbligatori.")
@@ -541,7 +541,7 @@ else:
                                         df_istanze.at[idx, "stato"] = "Assegnata"
                                         carica_su_sheet(df_istanze, "Richieste_Preside")
                                         
-                                        nuovo_c = pd.DataFrame([{"id_comodato": id_com, "tipo_soggetto": riga['ruolo_richiedente'], "nominativo": riga['richiedente'], "id_bene": bene_assegnato, "data_consegna": data_ora, "stato_comodato": "Chiuso/Consegnato"}])
+                                        nuovo_c = pd.DataFrame([{"id_comodato": id_com, "tipo_soggetto", riga['ruolo_richiedente'], "nominativo": riga['richiedente'], "id_bene": bene_assegnato, "data_consegna": data_ora, "stato_comodato": "Chiuso/Consegnato"}])
                                         carica_su_sheet(pd.concat([df_reg_c, nuovo_c], ignore_index=True), "Registro_Comodati")
                                         
                                         if riga['categoria_bene'] in ["PC Notebook", "Chiave d'Accesso"]:
@@ -630,7 +630,7 @@ else:
                                         st.rerun()
                                 else:
                                     st.error("Inserire la firma digitale per validare il rientro del bene.")
-                                    
+                                        
             with tab_tutti_comodati:
                 st.dataframe(scarica_da_sheet("Inventario_Comodati"), use_container_width=True, hide_index=True)
                 
@@ -638,7 +638,7 @@ else:
                 st.dataframe(df_istanze, use_container_width=True, hide_index=True)
 
     # ==========================================
-    # WORKFLOW 4: MODIFICATO INTERAMENTE ED ESCLUSIVAMENTE PER MAGAZZINIERI (ATA O STANDARD)
+    # WORKFLOW 4: MODIFICATO INTERAMENTE ED ESCLUSIVAMENTE PER MAGAZZINIERI (CON TAB E AGGIUNTA ELEMENTI)
     # ==========================================
     elif st.session_state.ruolo_utente == "magazziniere":
         st.markdown(f"## 📦 Magazzino Operativo: {st.session_state.magazzino_selezionato}")
@@ -650,28 +650,72 @@ else:
         tab_inv, tab_req = st.tabs(["📋 INVENTARIO MERCI", "📥 RICHIESTE REPARTO"])
         
         with tab_inv:
-            st.subheader("Giacenzen di Magazzino Attuali")
+            st.subheader("Giacenze di Magazzino Attuali")
             df_inventario_standard = scarica_da_sheet(scheda_inventario)
             
             if df_inventario_standard.empty:
                 st.warning("Inventario vuoto o non configurato su Google Sheets.")
+                # Se è completamente vuoto, creiamo la struttura base per poter inserire elementi
+                df_inventario_standard = pd.DataFrame(columns=["id", "elemento", "valore"])
             else:
                 st.dataframe(df_inventario_standard, use_container_width=True, hide_index=True)
-                
-                st.markdown("### 🔄 Rettifica Giacenza Articolo")
-                with st.form("form_giacenze_standard"):
-                    elemento_sel = st.selectbox(
-                        "Seleziona Articolo:", 
-                        df_inventario_standard["elemento"].tolist() if "elemento" in df_inventario_standard.columns else []
-                    )
-                    nuova_qta = st.number_input("Nuova quantità registrata:", min_value=0, step=1)
+            
+            # Layout a due colonne per dividere le azioni di modifica e inserimento
+            col_add, col_edit = st.columns(2)
+            
+            with col_add:
+                st.markdown("### ➕ Aggiungi Nuovo Articolo in Giacenza")
+                with st.form("form_aggiungi_elemento"):
+                    nuovo_id_item = st.text_input("Codice / ID Articolo:")
+                    nuovo_nome_item = st.text_input("Nome / Descrizione Articolo:")
+                    nuova_qta_item = st.number_input("Quantità iniziale in Stock:", min_value=0, step=1, value=0)
                     
-                    if st.form_submit_button("Salva Modifica"):
-                        if "elemento" in df_inventario_standard.columns:
-                            df_inventario_standard.loc[df_inventario_standard["elemento"] == elemento_sel, "valore"] = nuova_qta
+                    if st.form_submit_button("Inserisci nel Magazzino", type="primary"):
+                        if nuovo_id_item.strip() and nuovo_nome_item.strip():
+                            # Controllo se l'elemento o l'ID esiste già
+                            id_esiste = False
+                            if "id" in df_inventario_standard.columns:
+                                id_esiste = str(nuovo_id_item.strip()) in df_inventario_standard["id"].astype(str).tolist()
+                            
+                            if id_esiste:
+                                st.error("Errore: Un articolo con questo ID è già presente in inventario.")
+                            else:
+                                nuovo_rigo = pd.DataFrame([{
+                                    "id": nuovo_id_item.strip(),
+                                    "elemento": nuovo_nome_item.strip(),
+                                    "valore": str(nuova_qta_item)
+                                }])
+                                df_aggiornato = pd.concat([df_inventario_standard, nuovo_rigo], ignore_index=True)
+                                carica_su_sheet(df_aggiornato, scheda_inventario)
+                                st.success(f"✅ Articolo '{nuovo_nome_item}' aggiunto con successo!")
+                                st.rerun()
+                        else:
+                            st.error("Compila tutti i campi (ID e Nome) per aggiungere l'articolo.")
+                            
+            with col_edit:
+                st.markdown("### 🔄 Rettifica Giacenza Articolo Esistente")
+                if not df_inventario_standard.empty and "elemento" in df_inventario_standard.columns:
+                    with st.form("form_giacenze_standard"):
+                        elemento_sel = st.selectbox(
+                            "Seleziona Articolo da modificare:", 
+                            df_inventario_standard["elemento"].tolist()
+                        )
+                        # Recupera il valore corrente per pre-compilare il campo
+                        valore_attuale = 0
+                        try:
+                            valore_attuale = int(df_inventario_standard.loc[df_inventario_standard["elemento"] == elemento_sel, "valore"].values[0])
+                        except:
+                            pass
+                            
+                        nuova_qta = st.number_input("Nuova quantità totale registrata:", min_value=0, step=1, value=valore_attuale)
+                        
+                        if st.form_submit_button("Salva Modifica Quantità"):
+                            df_inventario_standard.loc[df_inventario_standard["elemento"] == elemento_sel, "valore"] = str(nuova_qta)
                             carica_su_sheet(df_inventario_standard, scheda_inventario)
-                            st.success(f"Giacenza aggiornata per {elemento_sel}!")
+                            st.success(f"Giacenza aggiornata per {elemento_sel} a {nuova_qta} unità!")
                             st.rerun()
+                else:
+                    st.info("Nessun articolo disponibile per la modifica.")
                             
         with tab_req:
             st.subheader("Richieste Assegnate al Reparto")
