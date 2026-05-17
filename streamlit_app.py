@@ -325,6 +325,7 @@ if "ruolo_utente" not in st.session_state: st.session_state.ruolo_utente = None
 if "utente_corrente" not in st.session_state: st.session_state.utente_corrente = ""
 if "ruolo_specifico" not in st.session_state: st.session_state.ruolo_specifico = ""
 if "magazzino_selezionato" not in st.session_state: st.session_state.magazzino_selezionato = None
+if "tipo_richiesta_utente" not in st.session_state: st.session_state.tipo_richiesta_utente = ""
 
 # --- PORTALE DI LOGIN ---
 if st.session_state.ruolo_utente is None:
@@ -333,10 +334,12 @@ if st.session_state.ruolo_utente is None:
         st.markdown("<h2 style='text-align: center;'>Piattaforma Logistica di Istituto</h2>", unsafe_allow_html=True)
         with st.container(border=True):
             scelta = st.radio("Seleziona profilo d'accesso:", [
-                "📝 Collaboratore / Alunno / Docente (Invia Richiesta)",
+                "📝 Richiesta Comodato d'Uso Dispositivo (PC / Chiavi)",
+                "📦 Richiesta Materiale Consumabile / Logistica",
                 "🔑 Staff Magazzino / Amministrazione / Tecnici"
             ])
-            if "Collaboratore" in scelta:
+            
+            if "Richiesta Comodato" in scelta or "Richiesta Materiale" in scelta:
                 nome = st.text_input("Nome e Cognome del Richiedente:")
                 ruolo = st.selectbox("Seleziona il tuo Ruolo:", ["Alunno", "Docente", "Personale ATA", "Collaboratore Scolastico"])
                 email_ut = st.text_input("Inserisci la tua Email istituzionale:")
@@ -346,6 +349,7 @@ if st.session_state.ruolo_utente is None:
                         st.session_state.utente_corrente = nome.strip()
                         st.session_state.ruolo_specifico = ruolo
                         st.session_state.email_utente = email_ut.strip()
+                        st.session_state.tipo_richiesta_utente = "comodato" if "Richiesta Comodato" in scelta else "consumabile"
                         st.rerun()
                     else: st.error("Compila tutti i campi obbligatori.")
             else:
@@ -376,12 +380,12 @@ else:
     df_istanze = scarica_da_sheet("Richieste_Preside")
 
     # ==========================================
-    # WORKFLOW 1: COLLABORATORE / DOCENTE / ALUNNO
+    # WORKFLOW 1: COLLABORATORE / DOCENTE / ALUNNO (MODIFICATO LOGIN DIVISO)
     # ==========================================
     if st.session_state.ruolo_utente == "collaboratore":
         st.markdown(f"### Modulo Richieste Logistiche per: {st.session_state.ruolo_specifico}")
         
-        if st.session_state.ruolo_specifico in ["Alunno", "Docente"]:
+        if st.session_state.tipo_richiesta_utente == "comodato":
             categorie_disponibili = ["PC Notebook", "Chiave d'Accesso"]
             tipo_istanza_default = "Comodato d'Uso Dispositivo"
         else:
@@ -391,25 +395,46 @@ else:
         with st.form("mod_rich_divise"):
             cat_b = st.selectbox("Seleziona Bene richiesto:", categorie_disponibili)
             obj_b = st.text_input("Oggetto della Richiesta:")
-            mot_b = st.text_area("Motivazione dettagliata per la Direzione:")
+            mot_b = st.text_area("Motivazione dettagliata:")
             
-            if st.form_submit_button("Invia Istanza alla Dirigente", use_container_width=True):
+            if st.form_submit_button("Invia Istanza", use_container_width=True):
                 if obj_b.strip() and mot_b.strip():
                     try:
                         id_r_num = pd.to_numeric(df_istanze["id_richiesta"], errors='coerce')
                         nuovo_id = int(id_r_num.max()) + 1 if not df_istanze.empty and not id_r_num.dropna().empty else 101
                     except Exception: nuovo_id = 101
                     
+                    # Se è comodato va al vaglio della dirigente, se è consumabile viene approvata direttamente
+                    if st.session_state.tipo_richiesta_utente == "comodato":
+                        stato_iniziale = "In attesa di approvazione"
+                    else:
+                        stato_iniziale = "Approvata (Bypass Dirigente)"
+                    
                     nuova_r = pd.DataFrame([{
                         "id_richiesta": nuovo_id, "data_richiesta": datetime.now().strftime("%d/%m/%Y %H:%M"),
                         "richiedente": st.session_state.utente_corrente, "ruolo_richiedente": st.session_state.ruolo_specifico,
                         "email_utente": st.session_state.email_utente, "tipo_istanza": tipo_istanza_default,
                         "categoria_bene": cat_b, "oggetto": obj_b.strip(), "motivazione": mot_b.strip(),
-                        "stato": "In attesa di approvazione"
+                        "stato": stato_iniziale
                     }])
                     carica_su_sheet(pd.concat([df_istanze, nuova_r], ignore_index=True), "Richieste_Preside")
-                    invia_notifica_nuova_richiesta(nuovo_id, st.session_state.utente_corrente, st.session_state.ruolo_specifico, st.session_state.email_utente, tipo_istanza_default, obj_b.strip(), mot_b.strip())
-                    st.success(f"Richiesta ID {nuovo_id} inoltrata! La mail automatica è stata inviata al tuo indirizzo.")
+                    
+                    # Gestione dei flussi asincroni di notifica/smistamento immediato
+                    if st.session_state.tipo_richiesta_utente == "comodato":
+                        invia_notifica_nuova_richiesta(nuovo_id, st.session_state.utente_corrente, st.session_state.ruolo_specifico, st.session_state.email_utente, tipo_istanza_default, obj_b.strip(), mot_b.strip())
+                        st.success(f"Richiesta di Comodato ID {nuovo_id} inoltrata alla Dirigente scolastica!")
+                    else:
+                        # Smistamento diretto nel foglio del rispettivo magazzino per i materiali di consumo
+                        magazzino_dest = "Personale ATA" if cat_b in ["Cancelleria", "Carta e Consumabili"] else "Officina"
+                        scheda_dest = MAPPA_SCHEDE[magazzino_dest]["richieste"]
+                        df_target = scarica_da_sheet(scheda_dest)
+                        nuova_r_target = pd.DataFrame([{
+                            "id_richiesta": nuovo_id, "data_richiesta": datetime.now().strftime("%d/%m/%Y %H:%M"),
+                            "richiedente": st.session_state.utente_corrente, "oggetto": obj_b.strip(), "stato": "Pronto al Ritiro"
+                        }])
+                        carica_su_sheet(pd.concat([df_target, nuova_r_target], ignore_index=True), scheda_dest)
+                        st.success(f"Richiesta di Materiale ID {nuovo_id} registrata ed inviata direttamente al magazzino competente ({magazzino_dest}) senza vaglio del Dirigente.")
+                else: st.error("Compila tutti i campi obbligatori.")
 
     # ==========================================
     # WORKFLOW 2: TECNICI INFORMATICI
@@ -541,9 +566,8 @@ else:
                                         df_istanze.at[idx, "stato"] = "Assegnata"
                                         carica_su_sheet(df_istanze, "Richieste_Preside")
                                         
-                                        # RISOLTO QUI IL SYNTAXERROR (Sostituita la virgola con i due punti dopo "tipo_soggetto")
                                         nuovo_c = pd.DataFrame([{"id_comodato": id_com, "tipo_soggetto": riga['ruolo_richiedente'], "nominativo": riga['richiedente'], "id_bene": bene_assegnato, "data_consegna": data_ora, "stato_comodato": "Chiuso/Consegnato"}])
-                                        carica_su_sheet(pd.concat([df_reg_c, nuovo_c], ignore_index=True), "Registro_Comodati")
+                                        carica_su_sheet(pd.concat([df_reg_c, nuevo_c], ignore_index=True), "Registro_Comodati")
                                         
                                         if riga['categoria_bene'] in ["PC Notebook", "Chiave d'Accesso"]:
                                             df_inv_c.loc[df_inv_c["id_bene"] == bene_assegnato, "stato"] = "Assegnato"
@@ -656,12 +680,10 @@ else:
             
             if df_inventario_standard.empty:
                 st.warning("Inventario vuoto o non configurato su Google Sheets.")
-                # Se è vuoto, inizializziamo la struttura base colonne
                 df_inventario_standard = pd.DataFrame(columns=["id", "elemento", "valore"])
             else:
                 st.dataframe(df_inventario_standard, use_container_width=True, hide_index=True)
             
-            # Layout a due colonne per dividere le azioni di Inserimento e Modifica quantità
             col_add, col_edit = st.columns(2)
             
             with col_add:
@@ -673,7 +695,6 @@ else:
                     
                     if st.form_submit_button("Inserisci nel Magazzino", type="primary"):
                         if nuovo_id_item.strip() and nuovo_nome_item.strip():
-                            # Controllo se l'ID esiste già per evitare doppioni
                             id_esiste = False
                             if "id" in df_inventario_standard.columns:
                                 id_esiste = str(nuovo_id_item.strip()) in df_inventario_standard["id"].astype(str).tolist()
@@ -701,7 +722,6 @@ else:
                             "Seleziona Articolo da modificare:", 
                             df_inventario_standard["elemento"].tolist()
                         )
-                        # Recupera il valore corrente per pre-compilare il campo numerico
                         valore_attuale = 0
                         try:
                             valore_attuale = int(df_inventario_standard.loc[df_inventario_standard["elemento"] == elemento_sel, "valore"].values[0])
