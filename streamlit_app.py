@@ -27,7 +27,7 @@ try:
 except ImportError:
     FPDF_AVAILABLE = False
 
-# Configurazione iniziale di pagina
+# Configurazione iniziale di pagina (Aggiornata per evitare warning)
 st.set_page_config(page_title="Gestione Magazzini Scarpa", page_icon="🏢", layout="wide")
 
 PASSWORD_MAP = {
@@ -198,7 +198,7 @@ def carica_su_drive_unico(file_bytes, nome_file, mime_type, nome_cartella_dest):
         
         query = f"name='{nome_cartella_dest}' and '{ID_CARTELLA_DRIVE_PRINCIPALE}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false"
         risultato = service.files().list(q=query, spaces='drive', supportsAllDrives=True, includeItemsFromAllDrives=True).execute()
-        files = resultado.get('files', [])
+        files = risultato.get('files', [])
         
         if files: id_cartella = files[0]['id']
         else:
@@ -221,20 +221,20 @@ if "magazzino_selezionato" not in st.session_state: st.session_state.magazzino_s
 if st.session_state.ruolo_utente is None:
     col_l, col_c, col_r = st.columns([1, 1.8, 1])
     with col_c:
-        st.image(URL_LOGO, use_container_width=True)
+        st.image(URL_LOGO, width="stretch")
         st.markdown("<h2 style='text-align: center;'>Piattaforma Logistica di Istituto</h2>", unsafe_allow_html=True)
         with st.container(border=True):
             scelta = st.radio("Seleziona profilo:", ["Collaboratore (Richiesta Materiale)", "Staff Magazzino / Amministrazione"])
             if scelta == "Collaboratore (Richiesta Materiale)":
                 nome = st.text_input("Nome e Cognome:")
-                if st.button("Accedi", type="primary", use_container_width=True):
+                if st.button("Accedi", type="primary", width="stretch"):
                     if nome.strip():
                         st.session_state.ruolo_utente = "collaboratore"
                         st.session_state.utente_corrente = nome.strip()
                         st.rerun()
             else:
                 pwd = st.text_input("Codice autorizzazione:", type="password")
-                if st.button("Autentica ed Entra", type="primary", use_container_width=True):
+                if st.button("Autentica ed Entra", type="primary", width="stretch"):
                     if pwd in PASSWORD_MAP:
                         st.session_state.ruolo_utente = "magazziniere"
                         st.session_state.magazzino_selezionato = PASSWORD_MAP[pwd]
@@ -249,11 +249,11 @@ else:
     col_t, col_b_logout = st.columns([4, 1])
     with col_t: st.markdown(f"Accesso: **{st.session_state.utente_corrente.upper()}**")
     with col_b_logout:
-        if st.button("🚪 Cambia Profilo", use_container_width=True):
+        if st.button("🚪 Cambia Profilo", width="stretch"):
             st.session_state.ruolo_utente = None
             st.rerun()
             
-    st.image(URL_LOGO, use_container_width=True)
+    st.image(URL_LOGO, width="stretch")
 
     # --- MAIN ADMIN INTERFACE ---
     if st.session_state.ruolo_utente == "admin":
@@ -261,7 +261,7 @@ else:
         
         with tab_magazzini:
             mag_sel = st.selectbox("Seleziona Magazzino:", LISTA_MAGAZZINI)
-            st.dataframe(scarica_da_sheet(MAPPA_SCHEDE[mag_sel]["inventario"]), use_container_width=True, hide_index=True)
+            st.dataframe(scarica_da_sheet(MAPPA_SCHEDE[mag_sel]["inventario"]), width="stretch", hide_index=True)
             
         with tab_comodati:
             df_inv_comodati = scarica_da_sheet("Inventario_Comodati")
@@ -276,14 +276,14 @@ else:
                         id_b = st.text_input("ID Seriale (es. PC-012)")
                         tipo_b = st.selectbox("Categoria:", ["PC Notebook", "Chiave d'Accesso"])
                     with col2: desc_b = st.text_input("Descrizione")
-                    if st.form_submit_button("Aggiungi all'Inventario", use_container_width=True):
+                    if st.form_submit_button("Aggiungi all'Inventario", width="stretch"):
                         if id_b.strip() and desc_b.strip():
                             nuovo_b = pd.DataFrame([{"id_bene": id_b.strip(), "tipo_bene": tipo_b, "descrizione": desc_b.strip(), "stato": "Disponibile"}])
-                            df_inv_comodati = pd.concat([df_inv_comodati, nuovo_b], ignore_index=True)
+                            df_inv_comodati = pd.concat([df_inv_comodati, nuevo_b], ignore_index=True)
                             carica_su_sheet(df_inv_comodati, "Inventario_Comodati")
                             st.success("Bene inserito!")
                             st.rerun()
-                st.dataframe(df_inv_comodati, use_container_width=True, hide_index=True)
+                st.dataframe(df_inv_comodati, width="stretch", hide_index=True)
                 
             with sub_nuovo:
                 st.markdown("### Nuovo Accordo di Comodato")
@@ -305,7 +305,7 @@ else:
                     # --- INPUT DI TESTO PER RICEVERE LA FIRMA DAL COMPONENTE ---
                     dati_firma_raw = st.text_input("Dati di validazione firma (Generati automaticamente):", key="valore_firma_str", help="Questo campo si compila da solo appena finisci di disegnare.")
 
-                    # --- COMPONENTE TABLET FIRMA CON AGGANCIO DIRETTO DEI COMPONENTI DI STREAMLIT ---
+                    # --- COMPONENTE TABLET FIRMA CON STANDARDS AGGIORNATI ---
                     html_pad_firma = """
                     <div style="background: #f8fafc; border: 2px dashed #cbd5e1; padding: 15px; border-radius: 12px; max-width:540px;">
                         <canvas id="canvas_firma" width="500" height="160" style="border:2px solid #64748b; background:#fff; cursor:crosshair; touch-action: none; border-radius:8px;"></canvas>
@@ -359,7 +359,6 @@ else:
                         }
 
                         function aggiornaInputStreamlit(valore) {
-                            // Cerca l'input testuale nativo di Streamlit all'interno della pagina principale ed inserisce la stringa base64
                             var inputs = window.parent.document.querySelectorAll('input[type="text"]');
                             for (var i = 0; i < inputs.length; i++) {
                                 if (inputs[i].getAttribute('aria-label') && inputs[i].getAttribute('aria-label').includes("Dati di validazione")) {
@@ -371,15 +370,15 @@ else:
                         }
                     </script>
                     """
-                    st.components.v1.html(html_pad_firma, height=240)
+                    st.iframe(f"data:text/html;charset=utf-8,{html_pad_firma}", height=240)
 
-                    if st.button("✍️ Approva e Salva PDF su Google Drive", type="primary", use_container_width=True):
+                    if st.button("✍️ Approva e Salva PDF su Google Drive", type="primary", width="stretch"):
                         nome_pulito = st.session_state.input_nome_assegnatario.strip()
                         firma_acquisita = st.session_state.valore_firma_str.strip()
                         
                         if nome_pulito:
-                            # Controllo bloccante sulla presenza reale della stringa immagine
-                            if not signature_data or len(firma_acquisita) < 500:
+                            # CORRETTO: Adesso la variabile controllata corrisponde a quella estratta dallo stato sessione
+                            if not firma_acquisita or len(firma_acquisita) < 500:
                                 st.error("⚠️ Errore di Acquisizione: Non hai firmato nel riquadro bianco o la firma è troppo corta. Riprova.")
                             else:
                                 with st.spinner("Generazione ed upload del documento in corso..."):
@@ -416,9 +415,9 @@ else:
                             c1, c2 = st.columns([3, 1])
                             with c1:
                                 st.markdown(f"📦 Oggetto: **{riga['id_bene']}** affidato a **{riga['nominativo']}** ({riga['tipo_soggetto']})")
-                                st.caption(f"Assegnato il: {riga['data_consegna']} | ID Contratto: {riga['id_comodato']}")
+                                st.caption(f"Assegnatario il: {riga['data_consegna']} | ID Contratto: {riga['id_comodato']}")
                             with c2:
-                                if st.button("Riconsegna ↩", key=f"ric_{riga['id_comodato']}", type="primary", use_container_width=True):
+                                if st.button("Riconsegna ↩", key=f"ric_{riga['id_comodato']}", type="primary", width="stretch"):
                                     data_rientro = datetime.now().strftime("%d/%m/%Y %H:%M")
                                     pdf_rientro_bytes = genera_pdf_comodato(riga['id_comodato'], riga['nominativo'], riga['tipo_soggetto'], riga['id_bene'], data_rientro, "RICONSEGNA", utente_loggato=st.session_state.utente_corrente)
                                     
