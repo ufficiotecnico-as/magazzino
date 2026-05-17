@@ -7,8 +7,8 @@ from PIL import Image
 import requests
 
 # --- CONFIGURAZIONE INTERMEDIARIO (GOOGLE APPS SCRIPT) ---
-# Aggiornato con l'ultimo URL di deploy fornito:
-URL_INTERMEDIARIO_SILENZIOSO = "https://script.google.com/macros/s/AKfycbw9A0OSg-RVGNeioN6iIZwGrPLSlw25E7zwkXfd0HcIxksZ6Lx7D-8BOr82pCHwRGY/exec"
+# Aggiornato con il tuo ultimissimo URL di deploy fornito:
+URL_INTERMEDIARIO_SILENZIOSO = "https://script.google.com/macros/s/AKfycbyXBLjDpJrSGHoUpuspTsNAG9f6lGhF1e8oGyJ8nkY6jZMTJo04zsT_6eLyEybGgv4/exec"
 
 # --- CONTROLLO LIBRERIE ESTERNE ---
 try:
@@ -133,16 +133,16 @@ def carica_su_sheet(df, nome_scheda):
         worksheet.update(valori)
     except Exception: pass
 
-# --- FUNZIONE DI INVIO EMAIL (Indirizza i pulsanti a Streamlit) ---
+# --- FUNZIONE DI INVIO EMAIL ---
 def invia_notifica_email(id_richiesta, roommate, tipo_istanza, oggetto, motivazione):
     try:
         import smtplib
         from email.mime.text import MIMEText
         from email.mime.multipart import MIMEMultipart
 
-        # Link configurati per puntare all'interfaccia Streamlit sicura passandogli i parametri
-        url_approva = f"https://magazzinoscarpa.streamlit.app/?action=approve&id={id_richiesta}"
-        url_rifiuta = f"https://magazzinoscarpa.streamlit.app/?action=reject&id={id_richiesta}"
+        # Configurato in automatico con il link ufficiale fornito
+        url_approva = f"https://magazzino-scarpa.streamlit.app/?action=approve&id={id_richiesta}"
+        url_rifiuta = f"https://magazzino-scarpa.streamlit.app/?action=reject&id={id_richiesta}"
 
         if "email_config" in st.secrets:
             cfg = st.secrets["email_config"]
@@ -266,7 +266,7 @@ def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione, 
             f"Dettaglio del Bene Assegnato:\n"
             f"- Identificativo / Seriale: {bene}\n\n"
             f"Il sottoscritto prende in carico l'oggetto integro, dichiarando di averne verificato il perfetto stato "
-            f"di funzionamento. Si impegna altresi a custodirlo responsabilmente, utilizzarlo esclusivamente per le finalita "
+            f"di funzionamento. Si impegna altresi a custodirlo responsabilmente, utilizzarlo esclusivamente for le finalita "
             f"istituzionali e connesse alle attivita didattiche, ed a restituirlo integro alla Direzione al termine del periodo "
             f"di utilizzo o su esplicita richiesta dell'Istituto."
         )
