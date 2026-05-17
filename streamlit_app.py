@@ -9,11 +9,11 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
-# --- IMPORTAZIONE SICURA DEL NUOVO MODULO INDIPENDENTE ---
+# --- IMPORTAZIONE SICURA E INGEGNERIZZATA DEL NUOVO MODULO ---
 try:
     from gestione_preventivi import mostra_interfaccia_preventivi
     MODULO_PREVENTIVI_DISPONIBILE = True
-except ModuleNotFoundError:
+except Exception:
     MODULO_PREVENTIVI_DISPONIBILE = False
 
 # --- CONFIGURAZIONE INTERMEDIARIO (GOOGLE APPS SCRIPT) ---
