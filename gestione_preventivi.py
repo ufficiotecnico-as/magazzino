@@ -58,7 +58,6 @@ def mostra_interfaccia_preventivi(scarica_da_sheet, carica_su_sheet, invia_email
                         st.success(f"Ditta '{rag_soc.strip()}' registrata in rubrica!")
                         st.rerun()
                         
-        df_fornitori_attivi = df_fornitori[df_fornitori["ragione_sociale"].get(df_fornitori["ragione_sociale"] != "").any() if not df_fornitori.empty else False]
         df_fornitori_attivi = df_fornitori[df_fornitori["ragione_sociale"].astype(str).str.strip() != ""] if not df_fornitori.empty else pd.DataFrame()
 
         if df_fornitori_attivi.empty:
@@ -94,7 +93,6 @@ def mostra_interfaccia_preventivi(scarica_da_sheet, carica_su_sheet, invia_email
             with st.form("form_aggiunta_preventivo"):
                 st.markdown("##### 🏢 Selezione Fornitore da Rubrica")
                 
-                # Mappa dizionario per evitare l'uso di .iloc rischioso sugli indici sballati
                 mappa_nomi = {}
                 opzioni_rubrica = []
                 for _, f in df_fornitori_attivi.iterrows():
@@ -108,7 +106,6 @@ def mostra_interfaccia_preventivi(scarica_da_sheet, carica_su_sheet, invia_email
                 
                 if st.form_submit_button("Registra preventivo a sistema"):
                     f_dati = mappa_nomi[fornitore_selezionato_rubrica]
-                    
                     blocco_spett_le = f"{f_dati['ragione_sociale']}\nSede Legale: {f_dati['indirizzo']}\nP.IVA / C.F.: {f_dati['partita_iva']}\nContatto: {f_dati['email_contatto']}"
                     
                     id_prev_num = pd.to_numeric(df_preventivi["id_preventivo"], errors='coerce')
@@ -126,7 +123,7 @@ def mostra_interfaccia_preventivi(scarica_da_sheet, carica_su_sheet, invia_email
                         "determina": ""
                     }])
                     carica_su_sheet(pd.concat([df_preventivi, nuovo_prev_df], ignore_index=True), "Registro_Preventivi")
-                    st.success(f"Preventivo ID {id_prev_nuovo} salvato con successo! Nessun inserimento manuale eseguito.")
+                    st.success(f"Preventivo ID {id_prev_nuovo} salvato con successo!")
                     st.rerun()
                         
     # ---------------------------------------------------------
@@ -135,7 +132,6 @@ def mostra_interfaccia_preventivi(scarica_da_sheet, carica_su_sheet, invia_email
     with tab_registro_finito:
         st.markdown("### Valutazione, Approvazione ed Emissione Lettera d'Ordine")
         
-        # Filtro protetto contro le celle vuote introdotte dall'allineamento automatico
         df_preventivi_validi = df_preventivi[df_preventivi["id_preventivo"].astype(str).str.strip() != ""] if not df_preventivi.empty else pd.DataFrame()
         
         if df_preventivi_validi.empty:
@@ -175,7 +171,7 @@ def mostra_interfaccia_preventivi(scarica_da_sheet, carica_su_sheet, invia_email
                     else:
                         mappa_dati_pdf = {
                             "fornitore": riga_p["fornitore"],
-                            "oggetto_ordine": f"Affidamento directo fornitura materiale d'istituto - Richiesta Magazzino ID {riga_p['id_richiesta_mag']}",
+                            "oggetto_ordine": f"Affidamento diretto fornitura materiale d'istituto - Richiesta Magazzino ID {riga_p['id_richiesta_mag']}",
                             "data_preventivo": data_prev_forn,
                             "protocollo_fornitore": prot_forn,
                             "protocollo_istituto": prot_inst,
@@ -212,7 +208,7 @@ def mostra_interfaccia_preventivi(scarica_da_sheet, carica_su_sheet, invia_email
                                 label="📥 Scarica Copia Locale Lettera d'Ordine (PDF)",
                                 data=pdf_bytes,
                                 file_name=nome_file_generato,
-                                mime_type="application/pdf",
+                                mime="application/pdf",
                                 use_container_width=True
                             )
                             st.balloons()
