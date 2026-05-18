@@ -85,7 +85,23 @@ def scarica_da_sheet(nome_scheda):
     if sh is None: return pd.DataFrame()
     try:
         worksheet = sh.worksheet(nome_scheda)
-        return pd.DataFrame(worksheet.get_all_records())
+        df = pd.DataFrame(worksheet.get_all_records())
+        
+        # Allineamento forzato e pulizia colonne per evitare KeyError futuri
+        if "Registro_Preventivi" in nome_scheda:
+            colonne_obbligatorie = ["id_preventivo", "id_richiesta_mag", "fornitore", "importo_ivato", "data_inserimento", "stato_approvazione", "note", "cig", "determina"]
+            for col in colonne_obbligatorie:
+                if col not in df.columns: df[col] = ""
+        elif "Anagrafica_Fornitori" in nome_scheda:
+            colonne_obbligatorie = ["id_fornitore", "ragione_sociale", "partita_iva", "indirizzo", "email_contatto"]
+            for col in colonne_obbligatorie:
+                if col not in df.columns: df[col] = ""
+        elif "Richieste_Preventivo_Magazzino" in nome_scheda:
+            colonne_obbligatorie = ["id_richiesta_mag", "data_creazione", "magazzino_origine", "materiale_richiesto", "quantita_esimata", "stato_iter", "note"]
+            for col in colonne_obbligatorie:
+                if col not in df.columns: df[col] = ""
+                
+        return df
     except gspread.exceptions.WorksheetNotFound:
         if "Inventario_Comodati" in nome_scheda:
             df_base = pd.DataFrame(columns=["id_bene", "tipo_bene", "descrizione", "stato"])
@@ -376,7 +392,7 @@ if "action" in query_params and "id" in query_params:
             idx = idx_lista[0]
             if df_f.at[idx, "stato"] == "In attesa di approvazione":
                 nuovo_stato = "In lavorazione" if (azione == "approve" and df_f.at[idx, "categoria_bene"] == "PC Notebook") else ("Lavorata" if azione == "approve" else "Rifiutata")
-                df_f.at[idx, "stato"] = nuovo_stato
+                df_f.at[idx, "stato"] = nuevo_stato
                 carica_su_sheet(df_f, "Richieste_Preside")
                 if azione == "approve":
                     invia_notifica_approvata_preside(id_req, df_f.at[idx, "email_utente"], df_f.at[idx, "oggetto"], df_f.at[idx, "categoria_bene"])
