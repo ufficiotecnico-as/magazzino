@@ -24,7 +24,6 @@ def mostra_interfaccia_preventivi(scarica_da_sheet, carica_su_sheet, invia_email
         st.markdown("### Elenco dei materiali segnalati dai capigruppo logistici")
         st.write("Questi articoli necessitano della ricerca di un preventivo sul mercato o sul portale MePA.")
         
-        # FILTRO CORRETTO CHIRURGICAMENTE PER EVITARE KEYERROR
         df_fabbisogni_attivi = df_fabbisogni[df_fabbisogni["materiale_richiesto"].astype(str).str.strip() != ""] if not df_fabbisogni.empty else pd.DataFrame()
         
         if df_fabbisogni_attivi.empty:
@@ -47,7 +46,6 @@ def mostra_interfaccia_preventivi(scarica_da_sheet, carica_su_sheet, invia_email
                     if not rag_soc.strip() or not p_iva.strip():
                         st.error("I campi Ragione Sociale e Partita IVA sono tassativamente obbligatori per il censimento.")
                     else:
-                        # Calcolo ID incrementale per il fornitore
                         id_forn_num = pd.to_numeric(df_fornitori["id_fornitore"], errors='coerce')
                         id_forn = int(id_forn_num.max() + 1) if not df_fornitori.empty and not id_forn_num.dropna().empty else 1
                         
@@ -64,7 +62,6 @@ def mostra_interfaccia_preventivi(scarica_da_sheet, carica_su_sheet, invia_email
                         st.success(f"Ditta '{rag_soc.strip()}' registrata in anagrafica con ID {id_forn}!")
                         st.rerun()
                         
-        # FILTRO CORRETTO CHIRURGICAMENTE PER EVITARE KEYERROR
         df_fornitori_attivi = df_fornitori[df_fornitori["ragione_sociale"].astype(str).str.strip() != ""] if not df_fornitori.empty else pd.DataFrame()
         
         if df_fornitori_attivi.empty:
@@ -76,7 +73,6 @@ def mostra_interfaccia_preventivi(scarica_da_sheet, carica_su_sheet, invia_email
     with tab_inserimento:
         st.markdown("### Collega un preventivo economico ricevuto a una richiesta interna")
         
-        # FILTRI CORRETTI CHIRURGICAMENTE PER EVITARE KEYERROR
         df_fabbisogni_attivi = df_fabbisogni[df_fabbisogni["materiale_richiesto"].astype(str).str.strip() != ""] if not df_fabbisogni.empty else pd.DataFrame()
         df_fornitori_attivi = df_fornitori[df_fornitori["ragione_sociale"].astype(str).str.strip() != ""] if not df_fornitori.empty else pd.DataFrame()
         
@@ -123,7 +119,6 @@ def mostra_interfaccia_preventivi(scarica_da_sheet, carica_su_sheet, invia_email
     with tab_registro_finito:
         st.markdown("### Valutazione, Dettaglio Articoli ed Emissione Lettera d'Ordine")
         
-        # FILTRO CORRETTO CHIRURGICAMENTE PER EVITARE KEYERROR
         df_preventivi_validi = df_preventivi[df_preventivi["id_preventivo"].astype(str).str.strip() != ""] if not df_preventivi.empty else pd.DataFrame()
         
         if df_preventivi_validi.empty:
@@ -134,7 +129,7 @@ def mostra_interfaccia_preventivi(scarica_da_sheet, carica_su_sheet, invia_email
             
             preventivi_valutabili = df_preventivi_validi[df_preventivi_validi["stato_approvazione"] == "In valutazione"]
             if preventivi_valutabili.empty:
-                st.info("Tutti i preventivi inseriti a sistema risultano già elaborati, respinti o trasformati in ordinativi.")
+                st.info("Tutti i preventivi inseriti a sistema risultano già elaborati, respinti o trasformati in ordinativos.")
             else:
                 st.markdown("#### ⚙️ Configura Voci di Dettaglio ed Emetti Ordine Ufficiale")
                 opzioni_preventivo = [f"PREV ID {p['id_preventivo']} - {p['fornitore'].splitlines()[0]} (€ {p['importo_ivato']})" for _, p in preventivi_valutabili.iterrows()]
@@ -169,8 +164,11 @@ def mostra_interfaccia_preventivi(scarica_da_sheet, carica_su_sheet, invia_email
                     
                     tot_riga = qta_art * prezzo_art
                     totale_calcolato += tot_riga
+                    
+                    # ALINEAMENTO CHIRURGICO CHIAVI PER STRUTTURA PDF INTERNA
                     lista_articoli.append({
                         "descrizione": desc_art,
+                        "descrizione_materiale": desc_art,  # Mantiene retrocompatibilità assoluta
                         "quantita": qta_art,
                         "prezzo_unitario": f"{prezzo_art:.2f}",
                         "totale_riga": f"{tot_riga:.2f}"
