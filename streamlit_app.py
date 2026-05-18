@@ -54,7 +54,7 @@ except ImportError:
     FPDF_AVAILABLE = False
 
 
-# --- MESSA IN SICUREZZA DI VALORI NULLI/NONE ---
+# --- PULIZIA CARATTERI CON GESTIONE SICURA DEI VALORI NONE/NULL ---
 def pulisci_caratteri_fpdf(testo):
     if testo is None:
         return ""
@@ -184,8 +184,7 @@ def genera_pdf_ordine_fornitore(dati):
     
     pdf.set_font("Arial", "", 9)
     for art in dati["articoli"]:
-        desc_prodotto = art.get("descrizione_materiale", art.get("descrizione", ""))
-        pdf.cell(110, 7, pulisci_caratteri_fpdf(desc_prodotto), 1, 0, "L")
+        pdf.cell(110, 7, pulisci_caratteri_fpdf(art["descrizione_materiale"]), 1, 0, "L")
         pdf.cell(15, 7, str(art["quantita"]), 1, 0, "C")
         pdf.cell(25, 7, f"{art['prezzo_unitario']} EUR", 1, 0, "R")
         pdf.cell(25, 7, f"{art['totale_riga']} EUR", 1, 1, "R")
@@ -269,6 +268,7 @@ else:
         with tab_carico:
             st.subheader("Registra un incremento di materiale a magazzino")
             if not df_inv.empty:
+                # EVITA CRASH SE MANCA LA COLONNA NELLO SHEET INVENTARIO
                 lista_materiali = df_inv["Descrizione materiale"].tolist() if "Descrizione materiale" in df_inv.columns else []
                 if lista_materiali:
                     scelta_mat = st.selectbox("Seleziona il bene da caricare:", lista_materiali, key="carico_sel")
@@ -281,6 +281,8 @@ else:
                         if carica_su_sheet(df_inv, nome_scheda_inv):
                             st.success("Inventario aggiornato con successo!")
                             st.rerun()
+                else:
+                    st.info("Nessun materiale tracciato in questa tabella.")
                         
         with tab_scarico:
             st.subheader("Registra prelievo di materiale dal magazzino")
