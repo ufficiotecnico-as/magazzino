@@ -3,22 +3,17 @@ import pandas as pd
 from datetime import datetime
 import io
 import base64
-from PIL import Image
+import json
 import requests
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
-# --- CONFIGURAZIONE PAGINA (Tassativamente all'inizio) ---
-st.set_page_config(page_title="Gestione Magazzini Scarpa", page_icon="🏢", layout="wide")
+# --- IMPORTAZIONE MODULO ESTERNO PREVENTIVI ---
+import gestione_preventivi
 
-# --- IMPORTAZIONE SICURA DEL MODULO INDEPENDENTE ---
-try:
-    import gestione_preventivi
-    from gestione_preventivi import mostra_interfaccia_preventivi
-    MODULO_PREVENTIVI_DISPONIBILE = True
-except Exception as e:
-    MODULO_PREVENTIVI_DISPONIBILE = False
+# --- CONFIGURAZIONE PAGINA ---
+st.set_page_config(page_title="Gestione Magazzini Scarpa", page_icon="🏢", layout="wide")
 
 # --- CONFIGURAZIONI SISTEMA ---
 URL_INTERMEDIARIO_SILENZIOSO = "https://script.google.com/macros/s/AKfycbyXBLjDpJrSGHoUpuspTsNAG9f6lGhF1e8oGyJ8nkY6jZMTJo04zsT_6eLyEybGgv4/exec"
@@ -26,7 +21,6 @@ ID_CARTELLA_CONSEGNE = "1pJpYtIfcMEKFh62rSOGTXWYG8CgvzN4m"
 ID_CARTELLA_RICONSEGNE = "1S6IcauDOc-8sFiCdGv67CHKf_H9u7BVW"
 ID_CARTELLA_ORDINI = "1bVTs2smvVJONs2oIAFZdDvX9pYDK9MZT"  
 SPREADSHEET_ID = "1Q91H_TULvpsnPcyOwQ1lxmjOf809xp4cUz9p1EdMc-4"
-ID_CARTELLA_DRIVE_PRINCIPALE = "1bVTs2smvVJONs2oIAFZdDvX9pYDK9MZT"
 URL_LOGO = "https://cspace.spaggiari.eu//pub/TVII0004/TVII0004-intestazione-nuova-senzaloghi.png?_t=1712923868"
 EMAIL_PRESIDE_TEST = "marcobrunetti14@gmail.com"
 
@@ -43,7 +37,9 @@ MAPPA_SCHEDE = {
     "Tecnici Informatici": {"inventario": "Inventario informatica", "richieste": "Richieste informatica"}
 }
 
-# --- CONTROLLO LIBRERIE ---
+df_istanze = pd.DataFrame()
+
+# --- IMPORTAZIONE LIBRERIE ---
 try:
     import gspread
     from google.oauth2 import service_account
@@ -52,570 +48,297 @@ except ImportError:
     GSPREAD_AVAILABLE = False
 
 try:
-    import googleapiclient.discovery
-    from googleapiclient.http import MediaIoBaseUpload
-    GOOGLE_DRIVE_AVAILABLE = True
-except ImportError:
-    GOOGLE_DRIVE_AVAILABLE = False
-
-try:
     from fpdf import FPDF
     FPDF_AVAILABLE = True
 except ImportError:
     FPDF_AVAILABLE = False
 
 
-# --- GOOGLE CONNECTIONS ---
+# --- MESSA IN SICUREZZA DI VALORI NULLI/NONE ---
+def pulisci_caratteri_fpdf(testo):
+    if testo is None:
+        return ""
+    testo = str(testo)
+    mappa = {
+        '€': 'EUR', 'à': 'a\'', 'è': 'e\'', 'é': 'e\'', 
+        'ì': 'i\'', 'ò': 'o\'', 'ù': 'u\'', '°': ' '
+    }
+    for k, v in mappa.items(): 
+        testo = testo.replace(k, v)
+    return testo
+
+
+# --- CORE GOOGLE CONNECTIONS ---
 @st.cache_resource(ttl=5)
 def connetti_google_sheets():
-    if not GSPREAD_AVAILABLE: return None
-    creds_info = None
-    if "google_creds" in st.secrets: creds_info = dict(st.secrets["google_creds"])
-    elif "gcp_service_account" in st.secrets: creds_info = dict(st.secrets["gcp_service_account"])
-    if not creds_info: return None
+    if not GSPREAD_AVAILABLE or "google_creds" not in st.secrets: 
+        return None
     try:
-        if "private_key" in creds_info: creds_info["private_key"] = creds_info["private_key"].replace("\\n", "\n").strip()
+        creds_info = dict(st.secrets["google_creds"])
+        if "private_key" in creds_info: 
+            creds_info["private_key"] = creds_info["private_key"].replace("\\n", "\n").strip()
         scopes = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
         creds = service_account.Credentials.from_service_account_info(creds_info, scopes=scopes)
         return gspread.authorize(creds).open_by_key(SPREADSHEET_ID)
-    except Exception: return None
+    except Exception: 
+        return None
 
 def scarica_da_sheet(nome_scheda):
     sh = connetti_google_sheets()
-    if sh is None: return pd.DataFrame()
-    try:
-        worksheet = sh.worksheet(nome_scheda)
-        df = pd.DataFrame(worksheet.get_all_records())
-        
-        # Allineamento forzato e pulizia colonne per evitare KeyError futuri
-        if "Registro_Preventivi" in nome_scheda:
-            colonne_obbligatorie = ["id_preventivo", "id_richiesta_mag", "fornitore", "importo_ivato", "data_inserimento", "stato_approvazione", "note", "cig", "determina"]
-            for col in colonne_obbligatorie:
-                if col not in df.columns: df[col] = ""
-        elif "Anagrafica_Fornitori" in nome_scheda:
-            colonne_obbligatorie = ["id_fornitore", "ragione_sociale", "partita_iva", "indirizzo", "email_contatto"]
-            for col in colonne_obbligatorie:
-                if col not in df.columns: df[col] = ""
-        elif "Richieste_Preventivo_Magazzino" in nome_scheda:
-            colonne_obbligatorie = ["id_richiesta_mag", "data_creazione", "magazzino_origine", "materiale_richiesto", "quantita_esimata", "stato_iter", "note"]
-            for col in colonne_obbligatorie:
-                if col not in df.columns: df[col] = ""
-                
-        return df
-    except gspread.exceptions.WorksheetNotFound:
-        if "Inventario_Comodati" in nome_scheda:
-            df_base = pd.DataFrame(columns=["id_bene", "tipo_bene", "descrizione", "stato"])
-        elif "Registro_Comodati" in nome_scheda:
-            df_base = pd.DataFrame(columns=["id_comodato", "tipo_soggetto", "nominativo", "id_bene", "data_consegna", "stato_comodato"])
-        elif "Richieste_Preside" in nome_scheda:
-            df_base = pd.DataFrame(columns=["id_richiesta", "data_richiesta", "richiedente", "ruolo_richiedente", "email_utente", "tipo_istanza", "categoria_bene", "oggetto", "motivazione", "stato"])
-        elif "Richieste_Preventivo_Magazzino" in nome_scheda:
-            df_base = pd.DataFrame(columns=["id_richiesta_mag", "data_creazione", "magazzino_origine", "materiale_richiesto", "quantita_esimata", "stato_iter", "note"])
-        elif "Registro_Preventivi" in nome_scheda:
-            df_base = pd.DataFrame(columns=["id_preventivo", "id_richiesta_mag", "fornitore", "importo_ivato", "data_inserimento", "stato_approvazione", "note", "cig", "determina"])
-        elif "Anagrafica_Fornitori" in nome_scheda:
-            df_base = pd.DataFrame(columns=["id_fornitore", "ragione_sociale", "partita_iva", "indirizzo", "email_contatto"])
-        else:
-            df_base = pd.DataFrame(columns=["id", "elemento", "valore"])
-        carica_su_sheet(df_base, nome_scheda)
-        return df_base
-    except Exception: return pd.DataFrame()
+    if sh is not None:
+        try:
+            ws = sh.worksheet(nome_scheda)
+            records = ws.get_all_records()
+            return pd.DataFrame(records) if records else pd.DataFrame()
+        except Exception:
+            return pd.DataFrame()
+    return pd.DataFrame()
 
 def carica_su_sheet(df, nome_scheda):
     sh = connetti_google_sheets()
-    if sh is None: return
-    try:
-        try: worksheet = sh.worksheet(nome_scheda)
-        except gspread.exceptions.WorksheetNotFound: worksheet = sh.add_worksheet(title=nome_scheda, rows="1000", cols="20")
-        worksheet.clear()
-        df_pulito = df.fillna("")
-        for col in df_pulito.columns: df_pulito[col] = df_pulito[col].astype(str)
-        valori = [df_pulito.columns.values.tolist()] + df_pulito.values.tolist()
-        worksheet.update(valori)
-    except Exception: pass
+    if sh is not None:
+        try:
+            ws = sh.worksheet(nome_scheda)
+            ws.clear()
+            df_filled = df.fillna("")
+            ws.update([df_filled.columns.values.tolist()] + df_filled.values.tolist())
+            return True
+        except Exception:
+            return False
+    return False
 
-def invia_email_sistema(destinatario, oggetto_mail, html_corpo):
-    if "email_config" not in st.secrets: return False
+def carica_su_drive_unico(file_bytes, nome_file, mime_type, id_cartella):
     try:
-        cfg = st.secrets["email_config"]
-        msg = MIMEMultipart('alternative')
-        msg['From'] = cfg.get("smtp_user")
+        payload = {
+            "nomeFile": nome_file,
+            "mimeType": mime_type,
+            "cartellaId": id_cartella,
+            "fileB64": base64.b64encode(file_bytes).decode("utf-8")
+        }
+        res = requests.post(URL_INTERMEDIARIO_SILENZIOSO, json=payload, timeout=30)
+        return res.status_code == 200
+    except Exception:
+        return False
+
+def invia_email_sistema(destinatario, oggetto, corpo_testo):
+    if "smtp_settings" not in st.secrets:
+        return False
+    try:
+        conf = st.secrets["smtp_settings"]
+        msg = MIMEMultipart()
+        msg['From'] = conf["smtp_username"]
         msg['To'] = destinatario
-        msg['Subject'] = oggetto_mail
-        msg.attach(MIMEText(html_corpo, 'html', 'utf-8'))
-        server = smtplib.SMTP(cfg.get("smtp_server", "smtp.gmail.com"), int(cfg.get("smtp_port", 587)))
+        msg['Subject'] = oggetto
+        msg.attach(MIMEText(corpo_testo, 'plain', 'utf-8'))
+        
+        server = smtplib.SMTP(conf["smtp_server"], int(conf["smtp_port"]))
         server.starttls()
-        server.login(cfg.get("smtp_user"), cfg.get("smtp_password"))
-        server.sendmail(cfg.get("smtp_user"), destinatario, msg.as_string())
+        server.login(conf["smtp_username"], conf["smtp_password"])
+        server.sendmail(conf["smtp_username"], destinatario, msg.as_string())
         server.quit()
         return True
-    except Exception: return False
-
-def invia_notifica_nuova_richiesta(id_req, utente, ruolo, email_ut, tipo_ist, ogg, mot):
-    html_ut = f"<h3>Portale Logistico Scarpa</h3><p>Gentile {utente} ({ruolo}), la tua richiesta <b>ID {id_req}</b> per '{ogg}' è in fase di valutazione.</p>"
-    invia_email_sistema(email_ut, f"Richiesta ID {id_req} in lavorazione", html_ut)
-    url_approva = f"https://magazzino-scarpa.streamlit.app/?action=approve&id={id_req}"
-    url_rifiuta = f"https://magazzino-scarpa.streamlit.app/?action=reject&id={id_req}"
-    html_pr = f"""<h2>Nuova Istanza da Autorizzare</h2><p><b>Richiedente:</b> {utente} ({ruolo})<br><b>Oggetto:</b> {ogg}<br><b>Motivazione:</b> {mot}</p>
-    <div style='margin-top:20px;'><a href='{url_approva}' style='background:#16a34a;color:white;padding:10px 20px;text-decoration:none;border-radius:5px;margin-right:10px;'>🟢 AUTORIZZA ADESSO</a><a href='{url_rifiuta}' style='background:#dc2626;color:white;padding:10px 20px;text-decoration:none;border-radius:5px;'>🔴 RIFIUTA</a></div>"""
-    invia_email_sistema(EMAIL_PRESIDE_TEST, f"📦 NUOVA ISTANZA DA VALUTARE - ID {id_req}", html_pr)
-
-def invia_notifica_approvata_preside(id_req, email_ut, ogg, categoria_bene):
-    dest = "passata ai Tecnici Informatici per configurazione." if categoria_bene == "PC Notebook" else "trasmessa direttamente all'Ufficio Tecnico/Magazzino."
-    html = f"<h3>Richiesta Approvata!</h3><p>La tua richiesta <b>ID {id_req}</b> per '{ogg}' è stata autorizzata ed è {dest}</p>"
-    invia_email_sistema(email_ut, f"Richiesta ID {id_req} Autorizzata dalla Dirigente", html)
-
-def invia_notifica_pronto_ritiro(id_req, email_ut, ogg):
-    html = f"<h3>Pronto per il ritiro!</h3><p>Il materiale relativo alla tua richiesta <b>ID {id_req} ({ogg})</b> è pronto al magazzino.</p>"
-    invia_email_sistema(email_ut, f"Materiale pronto per il ritiro - ID {id_req}", html)
-
-# --- COMPONENTE PDF MINISTERIALE ---
-class PDFMinisteriale(FPDF):
-    def footer(self):
-        self.set_y(-15)
-        self.set_font("Arial", "", 7)
-        self.set_text_color(100, 100, 100)
-        footer_text = 'ISISS "A. SCARPA"     Via Primo Maggio, 3 31045 Motta di Livenza (Tv)      C.F. 94071460268      Codice univoco UFOA6X'
-        self.cell(180, 4, pulisci_caratteri_fpdf(footer_text), ln=True, align="C")
-
-def pulisci_caratteri_fpdf(testo):
-    mappa = { "à": "a'", "á": "a'", "è": "e'", "é": "e'", "ì": "i'", "ò": "o'", "ù": "u'", "€": "EUR" }
-    for k, v in mappa.items(): testo = testo.replace(k, v)
-    return testo.encode('raw_unicode_escape').decode('utf-8').encode('latin1', 'replace').decode('latin1')
-
-def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione="Consegna", firma_base64=None, utente_loggato="Ufficio Tecnico"):
-    if not FPDF_AVAILABLE: return b"Errore PDF"
-    pdf = PDFMinisteriale()
-    pdf.add_page()
-    try: 
-        pdf.image(URL_LOGO, x=15, y=10, w=180)
-        pdf.set_y(35)
     except Exception:
-        pdf.set_font("Times", "B", 13)
-        pdf.cell(180, 6, "ISISS ANTONIO SCARPA", ln=True, align="C")
-        pdf.set_y(35)
+        return False
+
+
+# --- ENGINE GENERAZIONE PDF ORDINE ---
+def genera_pdf_ordine_fornitore(dati):
+    if not FPDF_AVAILABLE:
+        return b""
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_margins(15, 15, 15)
     
-    pdf.set_font("Times", "I", 10)
-    pdf.cell(90, 5, pulisci_caratteri_fpdf("Protocollo n. (vedi segnatura)"), ln=False)
-    pdf.cell(90, 5, pulisci_caratteri_fpdf("Motta di Livenza, (vedi segnatura)"), ln=True, align="R")
-    pdf.ln(8)
-    
-    pdf.set_font("Times", "B", 11)
-    pdf.cell(110, 5, "", ln=False)
-    pdf.cell(70, 5, pulisci_caratteri_fpdf(f"Alla componente Docente / al Personale:"), ln=True, align="L")
-    pdf.set_font("Times", "", 11)
-    pdf.cell(110, 5, "", ln=False)
-    pdf.cell(70, 5, pulisci_caratteri_fpdf(f"{nome} ({ruolo})"), ln=True, align="L")
+    pdf.set_font("Arial", "B", 10)
+    pdf.cell(0, 5, "ISISS JACOPO SCARPA", ln=True, align="L")
+    pdf.set_font("Arial", "", 9)
+    pdf.cell(0, 5, "Via Pieve di Soligo, 3 - 31045 Motta di Livenza (TV)", ln=True, align="L")
+    pdf.cell(0, 5, "Cod. Fisc. 93011310265 - Tel. 0422 860012", ln=True, align="L")
     pdf.ln(10)
     
-    pdf.set_font("Times", "B", 11)
-    pdf.cell(24, 5, "OGGETTO: ", ln=False)
-    testo_oggetto = f"Verbale di {tipo_operazione} Bene d'Istituto in Comodato d'Uso - ID {id_contratto}"
-    pdf.multi_cell(156, 5, pulisci_caratteri_fpdf(testo_oggetto))
-    pdf.ln(12)
+    pdf.set_x(110)
+    pdf.set_font("Arial", "B", 10)
+    pdf.cell(0, 5, "Spett.le Ditta:", ln=True)
+    for linea in dati["fornitore"].splitlines():
+        pdf.set_x(110)
+        pdf.set_font("Arial", "", 10)
+        pdf.cell(0, 5, pulisci_caratteri_fpdf(linea), ln=True)
+    pdf.ln(15)
     
-    pdf.set_font("Times", "", 11)
-    if tipo_operazione.lower() == "consegna":
-        corpo = (f"Con la presente si attesta la formale consegna in comodato d'uso del bene "
-                 f"d'Istituto (Identificativo Bene: {bene}) a favor di {nome}. Chi riceve il bene "
-                 f"costituisce parte custode e responsabile dell'oggetto integro, impegnandosi a conservarlo "
-                 f"con la massima cura e la dovuta diligenza professionale.")
-    else:
-        corpo = (f"Con la presente si attesta la formale riconsegna e il CONSEQUENTE rientro al magazzino del bene "
-                 f"d'Istituto (Identificativo Bene: {bene}) precedentemente concesso in comodato d'uso "
-                 f"a {nome}.")
-                 
-    pdf.multi_cell(180, 6, pulisci_caratteri_fpdf(corpo))
+    pdf.set_font("Arial", "B", 11)
+    pdf.cell(0, 6, f"OGGETTO: {pulisci_caratteri_fpdf(dati['oggetto_ordine'])}", ln=True)
+    pdf.set_font("Arial", "", 10)
+    pdf.cell(0, 6, f"Riferimento Vs. Preventivo del: {dati['data_preventivo']} | Nostro Protocollo Ingresso: {dati['protocollo_istituto']}", ln=True)
+    pdf.cell(0, 6, f"Determina di Affidamento: N. {dati['determina']} | Codice CIG Assegnato: {dati['cig']}", ln=True)
+    pdf.ln(8)
+    
+    corpo = "Con la presente si formalizza l'affidamento diretto per la fornitura dei beni sotto elencati, alle condizioni economiche e di consegna concordate nel preventivo in epigrafe."
+    pdf.multi_cell(0, 5, corpo)
+    pdf.ln(8)
+    
+    pdf.set_font("Arial", "B", 9)
+    pdf.cell(110, 7, "Descrizione Bene / Servizio", 1, 0, "L")
+    pdf.cell(15, 7, "Q.ta", 1, 0, "C")
+    pdf.cell(25, 7, "Prezzo", 1, 0, "R")
+    pdf.cell(25, 7, "Totale", 1, 1, "R")
+    
+    pdf.set_font("Arial", "", 9)
+    for art in dati["articoli"]:
+        desc_prodotto = art.get("descrizione_materiale", art.get("descrizione", ""))
+        pdf.cell(110, 7, pulisci_caratteri_fpdf(desc_prodotto), 1, 0, "L")
+        pdf.cell(15, 7, str(art["quantita"]), 1, 0, "C")
+        pdf.cell(25, 7, f"{art['prezzo_unitario']} EUR", 1, 0, "R")
+        pdf.cell(25, 7, f"{art['totale_riga']} EUR", 1, 1, "R")
+        
+    pdf.set_font("Arial", "B", 10)
+    pdf.cell(150, 7, "TOTALE FORNITURA:", 1, 0, "R")
+    pdf.cell(25, 7, f"{dati['importo_ivato']} EUR", 1, 1, "R")
     pdf.ln(20)
     
-    pdf.set_font("Times", "", 12)
-    pdf.cell(180, 5, pulisci_caratteri_fpdf("La Dirigente Scolastica"), ln=True, align="C")
-    pdf.set_font("Times", "B", 12)
-    pdf.cell(180, 5, pulisci_caratteri_fpdf("Maria Cristina Taddeo"), ln=True, align="C")
+    pdf.cell(90, 5, "Il Direttore dei Servizi Gen. Amm.vi", 0, 0, "C")
+    pdf.cell(90, 5, "Il Dirigente Scolastico", 0, 1, "C")
     
-    pdf.set_y(-55)
-    y_f = pdf.get_y()
-    pdf.set_font("Times", "", 10)
-    pdf.cell(100, 5, pulisci_caratteri_fpdf(f"F.to la parte Amministratrice ({utente_loggato})"))
-    pdf.cell(80, 5, pulisci_caratteri_fpdf(f"Firma della persona richiedente ({tipo_operazione}):"))
-    
-    if firma_base64 and len(firma_base64) > 100:
-        try:
-            dati_f = firma_base64.split(",")[1] if "," in firma_base64 else firma_base64
-            img_data = base64.b64decode(dati_f)
-            img_originale = Image.open(io.BytesIO(img_data))
-            sfondo_bianco = Image.new("RGBA", img_originale.size, "WHITE")
-            sfondo_bianco.paste(img_originale, (0, 0), img_originale)
-            img_buffer = io.BytesIO()
-            sfondo_bianco.convert("RGB").save(img_buffer, format="JPEG", quality=95)
-            img_buffer.seek(0)
-            pdf.image(img_buffer, x=115, y=y_f + 6, w=50, h=0)
-        except Exception: pdf.text(115, y_f + 10, "[Firma Acquisita]")
-    else:
-        pdf.text(115, y_f + 10, "____________________________")
-    return pdf.output()
+    return pdf.output(dest="S").encode("latin-1", errors="ignore")
 
-# --- LETTERA D'ORDINE ---
-def genera_pdf_ordine_fornitore(dati_ordine):
-    if not FPDF_AVAILABLE: return b"Errore PDF"
-    pdf = PDFMinisteriale()
-    pdf.add_page()
-    
-    try: 
-        pdf.image(URL_LOGO, x=15, y=10, w=180)
-        pdf.set_y(35)
-    except Exception:
-        pdf.set_font("Times", "B", 13)
-        pdf.cell(180, 6, "ISISS ANTONIO SCARPA", ln=True, align="C")
-        pdf.set_y(35)
-        
-    pdf.set_font("Times", "I", 10)
-    pdf.cell(90, 5, pulisci_caratteri_fpdf("Protocollo (vedi segnatura)"), ln=False)
-    pdf.cell(90, 5, pulisci_caratteri_fpdf("Motta di Livenza, (vedi segnatura)"), ln=True, align="R")
-    pdf.ln(8)
-    
-    pdf.set_font("Times", "B", 11)
-    pdf.cell(110, 5, "", ln=False)
-    pdf.cell(70, 5, pulisci_caratteri_fpdf("Spett.le"), ln=True, align="L")
-    pdf.set_font("Times", "", 11)
-    info_f = dati_ordine.get("fornitore", "Ditta Fornitrice")
-    for linea in info_f.split("\n"):
-        if linea.strip():
-            pdf.cell(110, 5, "", ln=False)
-            pdf.cell(70, 5, pulisci_caratteri_fpdf(linea.strip()), ln=True, align="L")
-    pdf.ln(10)
-    
-    pdf.set_font("Times", "B", 11)
-    pdf.cell(18, 5, "Oggetto: ", ln=False)
-    pdf.multi_cell(162, 5, pulisci_caratteri_fpdf(dati_ordine.get("oggetto_ordine", "")))
-    pdf.ln(8)
-    
-    pdf.set_font("Times", "", 11)
-    testo_rif = (f"In riferimento a Vostro preventivo inviato in data {dati_ordine.get('data_preventivo')} "
-                 f"vostro protocollo {dati_ordine.get('protocollo_fornitore')} "
-                 f"con nostro protocollo {dati_ordine.get('protocollo_istituto')} "
-                 f"e si invia ordine per quanto segue:")
-    pdf.multi_cell(180, 6, pulisci_caratteri_fpdf(testo_rif))
-    pdf.ln(8)
-    
-    pdf.set_font("Times", "B", 10)
-    pdf.cell(110, 7, pulisci_caratteri_fpdf("Descrizione"), border=1, ln=False, align="L")
-    pdf.cell(25, 7, pulisci_caratteri_fpdf("Q.tà"), border=1, ln=False, align="C")
-    pdf.cell(45, 7, pulisci_caratteri_fpdf("Importo IVATO"), border=1, ln=True, align="R")
-    
-    pdf.set_font("Times", "", 10)
-    pdf.cell(110, 7, pulisci_caratteri_fpdf(dati_ordine.get("descrizione_materiale")), border=1, ln=False, align="L")
-    pdf.cell(25, 7, pulisci_caratteri_fpdf(str(dati_ordine.get("quantita"))), border=1, ln=False, align="C")
-    pdf.cell(45, 7, pulisci_caratteri_fpdf(f"{dati_ordine.get('importo_ivato')} EUR"), border=1, ln=True, align="R")
-    
-    pdf.set_font("Times", "B", 10)
-    pdf.cell(135, 7, pulisci_caratteri_fpdf("TOTALE IMPONIBILE"), border=1, ln=False, align="R")
-    pdf.cell(45, 7, pulisci_caratteri_fpdf(f"{dati_ordine.get('importo_ivato')} EUR"), border=1, ln=True, align="R")
-    pdf.ln(10)
-    
-    pdf.set_font("Times", "", 11)
-    pdf.cell(180, 6, pulisci_caratteri_fpdf("Pagamento a mezzo mandato vista fattura, NS. Cod. Univoco UFOA6X"), ln=True)
-    pdf.cell(12, 6, "CIG: ", ln=False); pdf.set_font("Times", "B", 11); pdf.cell(168, 6, pulisci_caratteri_fpdf(dati_ordine.get("cig")), ln=True)
-    pdf.set_font("Times", "", 11); pdf.cell(28, 6, "DETERMINA: ", ln=False); pdf.set_font("Times", "B", 11); pdf.cell(152, 6, pulisci_caratteri_fpdf(dati_ordine.get("determina")), ln=True)
-    pdf.ln(6)
-    
-    pdf.set_font("Times", "I", 9.5)
-    testo_legge = ("Per ottemperare agli obblighi previsti dalla legge Vi ricordiamo che sarà necessario rilasciare la "
-                   "\"DICHIARAZIONE RELATIVA AL POSSESSO DEI REQUISITI PER L'AFFIDAMENTO DEI CONTRATTI PUBBLICI "
-                   "EX ARTT. 94, 95, 96, 97, 98 E 100 DEL CODICE DEI CONTRATTI - D. Lgs 36/2023\" completa di carta d'identità "
-                   "del legale rappresentante entro 7 giorni lavorativi dal ricevimento della presente alla mail tvis01100a@istruzione.it.\n"
-                   "Diversamente l'ordine si ritiene annullato.")
-    pdf.multi_cell(180, 5, pulisci_caratteri_fpdf(testo_legge)); pdf.ln(4)
-    pdf.set_font("Times", "", 11); pdf.cell(180, 5, pulisci_caratteri_fpdf("Cordiali saluti."), ln=True); pdf.ln(12)
-    
-    pdf.set_font("Times", "", 11); pdf.cell(180, 5, pulisci_caratteri_fpdf("La Dirigente Scolastica"), ln=True, align="C")
-    pdf.set_font("Times", "B", 11); pdf.cell(180, 5, pulisci_caratteri_fpdf("Maria Cristina Taddeo"), ln=True, align="C")
-    pdf.set_font("Times", "I", 7.5); pdf.cell(180, 4, pulisci_caratteri_fpdf("Documento informatico firmato digitalmente ai sensi del D.Lgs 82/2005 CAD art.45, ss.mm.ii e norme collegate"), ln=True, align="C")
-    return pdf.output()
 
-def carica_su_drive_unico(file_bytes, nome_file, mime_type, id_cartella_destinazione):
-    if not GOOGLE_DRIVE_AVAILABLE: return None
-    try:
-        creds_info = dict(st.secrets["google_creds"])
-        creds_info["private_key"] = creds_info["private_key"].replace("\\n", "\n").strip()
-        creds = service_account.Credentials.from_service_account_info(creds_info, scopes=['https://www.googleapis.com/auth/drive'])
-        service = googleapiclient.discovery.build('drive', 'v3', credentials=creds)
-        meta = {'name': nome_file, 'parents': [id_cartella_destinazione]}
-        media = MediaIoBaseUpload(io.BytesIO(file_bytes), mimetype=mime_type, resumable=True)
-        service.files().create(body=meta, media_body=media, fields='id', supportsAllDrives=True).execute()
-        return True
-    except Exception: return None
+# --- ROUTING DI AUTENTICAZIONE ---
+if "autenticato" not in st.session_state:
+    st.session_state.autenticato = False
+    st.session_state.ruolo = None
 
-def mostra_pad_firma(chiave_id):
-    html_pad = f"""
-    <div style="background: #f8fafc; border: 2px dashed #cbd5e1; padding: 15px; border-radius: 12px; font-family: sans-serif;">
-        <canvas id="canvas_firma_{chiave_id}" width="440" height="130" style="border:2px solid #64748b; background:#ffffff; cursor:crosshair; touch-action: none; border-radius:8px;"></canvas>
-        <div style="margin-top:10px; display:flex; gap:10px;">
-            <button type="button" onclick="pulisciCanvas_{chiave_id}()" style="padding:6px 12px; background:#ef4444; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold; font-size:12px;">Cancella</button>
-            <button type="button" onclick="generaCodiceFirma_{chiave_id}()" style="padding:6px 12px; background:#22c55e; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold; font-size:12px;">Genera Codice Firma</button>
-        </div>
-        <textarea id="output_b64_{chiave_id}" style="width:100%; height:45px; margin-top:10px; font-size:9px; color:#334155; border:1px solid #cbd5e1; border-radius:4px; display:none;" readonly></textarea>
-        <p id="msg_copia_{chiave_id}" style="font-size:11px; color:#b91c1c; font-weight:bold; margin-top:5px; display:none;">Firma Codificata! Fai triplo click nella casella sopra, copia tutto il testo (Ctrl+C) e incollalo nel campo Streamlit sotto.</p>
-    </div>
-    <script>
-        var canvas = document.getElementById('canvas_firma_{chiave_id}');
-        var ctx = canvas.getContext('2d');
-        ctx.strokeStyle = '#000000'; ctx.lineWidth = 3; ctx.lineCap = 'round';
-        var isDrawing = false;
-        function getCoordinate(e) {{
-            var rect = canvas.getBoundingClientRect();
-            if(e.touches && e.touches.length > 0) return {{ x: e.touches[0].clientX - rect.left, y: e.touches[0].clientY - rect.top }};
-            return {{ x: e.clientX - rect.left, y: e.clientY - rect.top }};
-        }}
-        canvas.addEventListener('mousedown', function(e) {{ isDrawing = true; var p = getCoordinate(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); }});
-        canvas.addEventListener('mousemove', function(e) {{ if(!isDrawing) return; var p = getCoordinate(e); ctx.lineTo(p.x, p.y); ctx.stroke(); }});
-        canvas.addEventListener('mouseup', function() {{ isDrawing = false; }});
-        canvas.addEventListener('touchstart', function(e) {{ isDrawing = true; var p = getCoordinate(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); e.preventDefault(); }}, {{passive: false}});
-        canvas.addEventListener('touchmove', function(e) {{ if(!isDrawing) return; var p = getCoordinate(e); ctx.lineTo(p.x, p.y); ctx.stroke(); e.preventDefault(); }}, {{passive: false}});
-        canvas.addEventListener('touchend', function() {{ isDrawing = false; }});
-        function pulisciCanvas_{chiave_id}() {{ ctx.clearRect(0, 0, canvas.width, canvas.height); document.getElementById('output_b64_{chiave_id}').style.display = 'none'; document.getElementById('msg_copia_{chiave_id}').style.display = 'none'; }}
-        function generaCodiceFirma_{chiave_id}() {{ var dataUrl = canvas.toDataURL('image/png'); var txt = document.getElementById('output_b64_{chiave_id}'); txt.value = dataUrl; txt.style.display = 'block'; document.getElementById('msg_copia_{chiave_id}').style.display = 'block'; txt.select(); }}
-    </script>
-    """
-    st.components.v1.html(html_pad, height=230)
-
-# --- REINDIRIZZAMENTO ---
-query_params = st.query_params
-if "action" in query_params and "id" in query_params:
-    azione = query_params["action"]
-    id_req = query_params["id"]
-    df_f = scarica_da_sheet("Richieste_Preside")
-    if not df_f.empty and "id_richiesta" in df_f.columns:
-        df_f["id_richiesta"] = df_f["id_richiesta"].astype(str)
-        idx_lista = df_f.index[df_f["id_richiesta"] == str(id_req)].tolist()
-        if idx_lista:
-            idx = idx_lista[0]
-            if df_f.at[idx, "stato"] == "In attesa di approvazione":
-                nuovo_stato = "In lavorazione" if (azione == "approve" and df_f.at[idx, "categoria_bene"] == "PC Notebook") else ("Lavorata" if azione == "approve" else "Rifiutata")
-                df_f.at[idx, "stato"] = nuevo_stato
-                carica_su_sheet(df_f, "Richieste_Preside")
-                if azione == "approve":
-                    invia_notifica_approvata_preside(id_req, df_f.at[idx, "email_utente"], df_f.at[idx, "oggetto"], df_f.at[idx, "categoria_bene"])
-                    if df_f.at[idx, "categoria_bene"] != "PC Notebook":
-                        invia_notifica_pronto_ritiro(id_req, df_f.at[idx, "email_utente"], df_f.at[idx, "oggetto"])
-    
-    st.query_params.clear()
-    st.success("Decisione registrata con successo!")
-    if st.button("Accedi alla Piattaforma"):
-        st.rerun()
-    st.stop()
-
-# --- INITIALIZE STATE ---
-if "ruolo_utente" not in st.session_state: st.session_state.ruolo_utente = None
-if "utente_corrente" not in st.session_state: st.session_state.utente_corrente = ""
-if "ruolo_specifico" not in st.session_state: st.session_state.ruolo_specifico = ""
-if "magazzino_selezionato" not in st.session_state: st.session_state.magazzino_selezionato = None
-
-# --- PORTALE LOGIN ---
-if st.session_state.ruolo_utente is None:
-    col_l, col_c, col_r = st.columns([1, 1.8, 1])
-    with col_c:
-        st.markdown("<h2 style='text-align: center;'>Piattaforma Logistica di Istituto</h2>", unsafe_allow_html=True)
-        with st.container(border=True):
-            scelta = st.radio("Seleziona profilo d'accesso:", ["📝 Collaboratore / Alunno / Docente (Invia Richiesta)", "🔑 Staff Magazzino / Amministrazione / Tecnici"])
-            if "Collaboratore" in scelta:
-                nome = st.text_input("Nome e Cognome del Richiedente:")
-                ruolo = st.selectbox("Seleziona il tuo Ruolo:", ["Alunno", "Docente", "Personale ATA", "Collaboratore Scolastico"])
-                email_ut = st.text_input("Inserisci la tua Email istituzionale:")
-                if st.button("Accedi al Modulo Richieste", type="primary", use_container_width=True):
-                    if nome.strip() and email_ut.strip():
-                        st.session_state.ruolo_utente = "collaboratore"
-                        st.session_state.utente_corrente = nome.strip()
-                        st.session_state.ruolo_specifico = ruolo
-                        st.session_state.email_utente = email_ut.strip()
-                        st.rerun()
-                    else: st.error("Compila tutti i campi.")
-            else:
-                pwd = st.text_input("Codice autorizzazione staff:", type="password")
-                if st.button("Autentica ed Entra", type="primary", use_container_width=True):
-                    if pwd in PASSWORD_MAP:
-                        st.session_state.ruolo_utente = "magazziniere"
-                        st.session_state.magazzino_selezionato = PASSWORD_MAP[pwd]
-                        st.session_state.utente_corrente = PASSWORD_MAP[pwd]
-                        st.rerun()
-                    elif pwd == PASSWORD_ADMIN:
-                        st.session_state.ruolo_utente = "admin"
-                        st.session_state.utente_corrente = "Ufficio Tecnico (Admin)"
-                        st.rerun()
-                    else: st.error("Codice errato.")
-else:
-    col_t, col_b_logout = st.columns([4, 1])
-    with col_t: st.markdown(f"Utente: **{st.session_state.utente_corrente.upper()}**")
-    with col_b_logout:
-        if st.button("🚪 Esci", use_container_width=True):
-            st.session_state.ruolo_utente = None
-            st.rerun()
+if not st.session_state.autenticato:
     st.image(URL_LOGO, use_container_width=True)
-
-    df_istanze = scarica_da_sheet("Richieste_Preside")
-
-    # ==========================================
-    # WORKFLOW INTERNO: COLLABORATORE RAGAZZI
-    # ==========================================
-    if st.session_state.ruolo_utente == "collaboratore":
-        st.markdown(f"### Modulo Richieste Logistiche per: {st.session_state.ruolo_specifico}")
-        categorie_disponibili = ["PC Notebook", "Chiave d'Accesso"] if st.session_state.ruolo_specifico in ["Alunno", "Docente"] else ["Cancelleria", "Carta e Consumabili", "Materiale d'Officina"]
-        tipo_istanza_default = "Comodato d'Uso Dispositivo" if st.session_state.ruolo_specifico in ["Alunno", "Docente"] else "Materiale Logistico / Consumo"
-
-        with st.form("mod_rich_divise"):
-            cat_b = st.selectbox("Seleziona Bene richiesto:", categorie_disponibili)
-            obj_b = st.text_input("Oggetto della Richiesta:")
-            mot_b = st.text_area("Motivazione dettagliata per la Direzione:")
-            if st.form_submit_button("Invia Istanza alla Dirigente", use_container_width=True):
-                if obj_b.strip() and mot_b.strip():
-                    id_r_num = pd.to_numeric(df_istanze["id_richiesta"], errors='coerce')
-                    nuovo_id = int(id_r_num.max()) + 1 if not df_istanze.empty and not id_r_num.dropna().empty else 101
-                    nuova_r = pd.DataFrame([{"id_richiesta": nuovo_id, "data_richiesta": datetime.now().strftime("%d/%m/%Y %H:%M"), "richiedente": st.session_state.utente_corrente, "ruolo_richiedente": st.session_state.ruolo_specifico, "email_utente": st.session_state.email_utente, "tipo_istanza": tipo_istanza_default, "categoria_bene": cat_b, "oggetto": obj_b.strip(), "motivazione": mot_b.strip(), "stato": "In attesa di approvazione"}])
-                    carica_su_sheet(pd.concat([df_istanze, nuova_r], ignore_index=True), "Richieste_Preside")
-                    invia_notifica_nuova_richiesta(nuovo_id, st.session_state.utente_corrente, st.session_state.ruolo_specifico, st.session_state.email_utente, tipo_istanza_default, obj_b.strip(), mot_b.strip())
-                    st.success(f"Richiesta ID {nuovo_id} inoltrata alla Dirigente!")
-
-    # ==========================================
-    # WORKFLOW INTERNO: TECNICI INFORMATICI 
-    # ==========================================
-    elif st.session_state.ruolo_utente == "magazziniere" and st.session_state.magazzino_selezionato == "Tecnici Informatici":
-        st.markdown("<h2>💻 Dashboard Laboratorio Hardware Informatico</h2>", unsafe_allow_html=True)
-        tab_scorte_it, tab_lavorazione_it, tab_fabbisogno_it = st.tabs(["📋 Inventario Hardware", "🛠️ PC da Configurare", "➕ Segnala Fabbisogno"])
-        
-        with tab_scorte_it:
-            st.dataframe(scarica_da_sheet("Inventario informatica"), use_container_width=True, hide_index=True)
+    st.markdown("<h2 style='text-align: center;'>🔑 Accesso Sicuro Sistema Logistico</h2>", unsafe_allow_html=True)
+    
+    password = st.text_input("Inserisci la password di dipartimento o amministrativa:", type="password")
+    if st.button("Effettua il Login", use_container_width=True):
+        if password in PASSWORD_MAP:
+            st.session_state.autenticato = True
+            st.session_state.ruolo = PASSWORD_MAP[password]
+            st.rerun()
+        elif password == PASSWORD_ADMIN:
+            st.session_state.autenticato = True
+            st.session_state.ruolo = "Amministrazione"
+            st.rerun()
+        else:
+            st.error("Chiave di sicurezza errata. Riprova.")
+else:
+    c_user, c_logout = st.columns([8, 2])
+    with c_user:
+        st.info(f"Utente Connesso: **{st.session_state.ruolo}**")
+    with c_logout:
+        if st.button("🚪 Esci dal Sistema", use_container_width=True):
+            st.session_state.autenticato = False
+            st.session_state.ruolo = None
+            st.rerun()
             
-        with tab_lavorazione_it:
-            da_lavorare = df_istanze[(df_istanze["stato"] == "In lavorazione") & (df_istanze["categoria_bene"] == "PC Notebook")] if not df_istanze.empty else pd.DataFrame()
-            if da_lavorare.empty: st.info("Nessun Notebook in attesa di configurazione software.")
+    if st.session_state.ruolo == "Amministrazione":
+        gestione_preventivi.mostra_interfaccia_preventivi(
+            scarica_da_sheet, 
+            carica_su_sheet, 
+            invia_email_sistema,
+            URL_INTERMEDIARIO_SILENZIOSO,
+            df_istanze,
+            genera_pdf_ordine_fornitore, 
+            carica_su_drive_unico, 
+            ID_CARTELLA_ORDINI
+        )
+        
+    else:
+        st.title(f"🏢 Pannello Gestione Interna - {st.session_state.ruolo}")
+        
+        nome_scheda_inv = MAPPA_SCHEDE[st.session_state.ruolo]["inventario"]
+        nome_scheda_req = MAPPA_SCHEDE[st.session_state.ruolo]["richieste"]
+        
+        tab_stato, tab_carico, tab_scarico, tab_segnala = st.tabs([
+            "📦 Inventario Attuale", 
+            "📥 Carico Nuove Merci", 
+            "📤 Scarico / Assegnazione Bene",
+            "🚨 Segnala Fabbisogno Esaurito"
+        ])
+        
+        df_inv = scarica_da_sheet(nome_scheda_inv)
+        
+        with tab_stato:
+            st.subheader("Disponibilità Materiali Real-Time")
+            if df_inv.empty:
+                st.warning("Inventario vuoto o non accessibile.")
             else:
-                for _, riga in da_lavorare.iterrows():
-                    with st.container(border=True):
-                        st.markdown(f"🛠️ **Richiesta ID {riga['id_richiesta']}** | Destinatario: **{riga['richiedente']}**")
-                        if st.button(f"Marca come PRONTO AL RITIRO ## ID {riga['id_richiesta']}", use_container_width=True):
-                            idx = df_istanze.index[df_istanze["id_richiesta"].astype(str) == str(riga['id_richiesta'])].tolist()[0]
-                            df_istanze.at[idx, "stato"] = "Lavorata"
-                            carica_su_sheet(df_istanze, "Richieste_Preside")
-                            invia_notifica_pronto_ritiro(riga['id_richiesta'], riga['email_utente'], riga['oggetto'])
-                            st.success("Stato aggiornato!")
+                st.dataframe(df_inv, use_container_width=True, hide_index=True)
+                
+        with tab_carico:
+            st.subheader("Registra un incremento di materiale a magazzino")
+            if not df_inv.empty:
+                lista_materiali = df_inv["Descrizione materiale"].tolist() if "Descrizione materiale" in df_inv.columns else []
+                if lista_materiali:
+                    scelta_mat = st.selectbox("Seleziona il bene da caricare:", lista_materiali, key="carico_sel")
+                    qta_carico = st.number_input("Quantità in ingresso:", min_value=1, step=1)
+                    
+                    if st.button("Conferma Carico Merci", use_container_width=True):
+                        idx = df_inv.index[df_inv["Descrizione materiale"] == scelta_mat].tolist()[0]
+                        df_inv.at[idx, "Giacenza attuale"] = int(df_inv.at[idx, "Giacenza attuale"]) + qta_carico
+                        df_inv.at[idx, "Ultimo aggiornamento"] = datetime.now().strftime("%d/%m/%Y %H:%M")
+                        if carica_su_sheet(df_inv, nome_scheda_inv):
+                            st.success("Inventario aggiornato con successo!")
                             st.rerun()
-                            
-        with tab_fabbisogno_it:
-            st.markdown("### Richiedi acquisto nuovo materiale informatico")
-            with st.form("form_f_it"):
-                mat_it = st.text_input("Materiale Informatico (es. 5 Monitor HDMI):")
-                qta_it = st.text_input("Specifiche/Quantità:")
-                note_it = st.text_area("Note:")
-                if st.form_submit_button("Invia ad Ufficio Tecnico"):
-                    df_rm = scarica_da_sheet("Richieste_Preventivo_Magazzino")
-                    id_rm = 2001 if df_rm.empty else int(pd.to_numeric(df_rm["id_richiesta_mag"], errors='coerce').max()) + 1
-                    nuovo = pd.DataFrame([{"id_richiesta_mag": id_rm, "data_creazione": datetime.now().strftime("%d/%m/%Y %H:%M"), "magazzino_origine": "Tecnici Informatici", "materiale_richiesto": mat_it, "quantita_esimata": qta_it, "stato_iter": "In attesa di preventivi", "note": note_it}])
-                    carica_su_sheet(pd.concat([df_rm, nuovo], ignore_index=True), "Richieste_Preventivo_Magazzino")
-                    st.success("Richiesta inserita nel registro preventivi admin!")
-
-    # ==========================================
-    # WORKFLOW INTERNO: AMMINISTRATORE (ADMIN / UFF TECNICO)
-    # ==========================================
-    elif st.session_state.ruolo_utente == "admin":
-        with st.sidebar:
-            st.markdown("### 👑 Amministrazione Globale")
-            sezione_selezionata = st.radio("Seleziona area di lavoro:", ["📦 Giacenza dei Magazzini", "📋 Richieste Personale ATA", "🔄 Gestione Comodati d'Uso", "📊 Gestione Preventivi e Fornitori"])
-        
-        if sezione_selezionata == "📦 Giacenza dei Magazzini":
-            st.markdown("## 📊 Stato Giacenze Inventario d'Istituto")
-            tab_mag1, tab_mag2, tab_mag3 = st.tabs(["🏬 Magazzino 1 (ATA)", "🔧 Magazzino 2 (Officina)", "💻 Magazzino 3 (Informatica)"])
-            with tab_mag1: st.dataframe(scarica_da_sheet("Inventario ata"), use_container_width=True, hide_index=True)
-            with tab_mag2: st.dataframe(scarica_da_sheet("Inventario officina"), use_container_width=True, hide_index=True)
-            with tab_mag3: st.dataframe(scarica_da_sheet("Inventario informatica"), use_container_width=True, hide_index=True)
-            st.markdown("### 📋 Elenco Completo Istanze Personale/Alunni")
-            st.dataframe(df_istanze, use_container_width=True, hide_index=True)
-
-        elif sezione_selezionata == "📋 Richieste Personale ATA":
-            st.markdown("## 📑 Richieste Interne Generali")
-            st.dataframe(df_istanze, use_container_width=True, hide_index=True)
-
-        elif sezione_selezionata == "🔄 Gestione Comodati d'Uso":
-            st.markdown("## 🛡️ Gestione Assegnazione e Riconsegna Comodati")
-            tab_pronte, tab_riconsegna, tab_tutti_comodati = st.tabs(["📦 PRATICHE DA CONSEGNARE", "🔄 RICONSEGNA BENI", "📋 INVENTARIO COMODATI"])
-            
-            with tab_pronte:
-                pronte = df_istanze[df_istanze["stato"] == "Lavorata"] if not df_istanze.empty else pd.DataFrame()
-                if pronte.empty: st.info("Nessuna pratica in attesa di consegna materiale.")
-                else:
-                    for _, riga in pronte.iterrows():
-                        with st.expander(f"📦 Consegna a {riga['richiedente']} [{riga['categoria_bene']}]"):
-                            df_inv_c = scarica_da_sheet("Inventario_Comodati")
-                            disp = df_inv_c[df_inv_c["stato"] == "Disponibile"]["id_bene"].tolist() if not df_inv_c.empty else []
-                            bene_assegnato = st.selectbox("Seleziona seriale:", disp, key=f"b_{riga['id_richiesta']}")
-                            stringa_incollata = st.text_area("Codice Firma Digitale (Generato dal Pad):", key=f"f_text_{riga['id_richiesta']}")
-                            mostra_pad_firma(riga['id_richiesta'])
-                            
-                            if st.button(f"Valida e Genera Verbale Consegna ## {riga['id_richiesta']}", type="primary"):
-                                df_reg_c = scarica_da_sheet("Registro_Comodati")
-                                id_com = int(pd.to_numeric(df_reg_c["id_comodato"], errors='coerce').max() + 1) if not df_reg_c.empty else 1001
-                                data_ora = datetime.now().strftime("%d/%m/%Y %H:%M")
-                                pdf_bytes = genera_pdf_comodato(id_com, riga['richiedente'], riga['ruolo_richiedente'], bene_assegnato, data_ora, "Consegna", stringa_incollata, st.session_state.utente_corrente)
-                                if carica_su_drive_unico(pdf_bytes, f"Verbale_Consegna_{id_com}.pdf", "application/pdf", ID_CARTELLA_CONSEGNE):
-                                    idx = df_istanze.index[df_istanze["id_richiesta"].astype(str) == str(riga['id_richiesta'])].tolist()[0]
-                                    df_istanze.at[idx, "stato"] = "Assegnata"
-                                    carica_su_sheet(df_istanze, "Richieste_Preside")
-                                    nuovo_c = pd.DataFrame([{"id_comodato": id_com, "tipo_soggetto": riga['ruolo_richiedente'], "nominativo": riga['richiedente'], "id_bene": bene_assegnato, "data_consegna": data_ora, "stato_comodato": "Chiuso/Consegnato"}])
-                                    carica_su_sheet(pd.concat([df_reg_c, nuovo_c], ignore_index=True), "Registro_Comodati")
-                                    df_inv_c.loc[df_inv_c["id_bene"] == bene_assegnato, "stato"] = "Assegnato"
-                                    carica_su_sheet(df_inv_c, "Inventario_Comodati")
-                                    st.success("Verbale creato e archiviato!"); st.rerun()
-
-            with tab_riconsegna:
-                df_reg_r = scarica_da_sheet("Registro_Comodati")
-                comodati_attivi = df_reg_r[df_reg_r["stato_comodato"] == "Chiuso/Consegnato"] if not df_reg_r.empty else pd.DataFrame()
-                if comodati_attivi.empty: st.info("Nessun prestito attivo.")
-                else:
-                    for _, comodato in comodati_attivi.iterrows():
-                        with st.expander(f"🔄 Riconsegna ID {comodato['id_comodato']} - {comodato['nominativo']}"):
-                            stringa_incollata_r = st.text_area("Codice Firma Reso:", key=f"txt_reso_{comodato['id_comodato']}")
-                            mostra_pad_firma(f"reso_{comodato['id_comodato']}")
-                            if st.button(f"Prendi in Carico Reso ## {comodato['id_comodato']}"):
-                                data_ora_reso = datetime.now().strftime("%d/%m/%Y %H:%M")
-                                pdf_bytes_r = genera_pdf_comodato(comodato['id_comodato'], comodato['nominativo'], comodato['tipo_soggetto'], comodato['id_bene'], data_ora_reso, "Riconsegna", stringa_incollata_r, st.session_state.utente_corrente)
-                                if carica_su_drive_unico(pdf_bytes_r, f"Verbale_Riconsegna_{comodato['id_comodato']}.pdf", "application/pdf", ID_CARTELLA_RICONSEGNE):
-                                    idx_reg = df_reg_r.index[df_reg_r["id_comodato"].astype(str) == str(comodato['id_comodato'])].tolist()[0]
-                                    df_reg_r.at[idx_reg, "stato_comodato"] = "Reso/Concluso"
-                                    carica_su_sheet(df_reg_r, "Registro_Comodati")
-                                    df_inv_r = scarica_da_sheet("Inventario_Comodati")
-                                    df_inv_r.loc[df_inv_r["id_bene"] == comodato['id_bene'], "stato"] = "Disponibile"
-                                    carica_su_sheet(df_inv_r, "Inventario_Comodati")
-                                    st.success("Reso salvato!"); st.rerun()
-
-            with tab_tutti_comodati: st.dataframe(scarica_da_sheet("Inventario_Comodati"), use_container_width=True, hide_index=True)
-
-        elif sezione_selezionata == "📊 Gestione Preventivi e Fornitori":
-            if MODULO_PREVENTIVI_DISPONIBILE:
-                mostra_interfaccia_preventivi(scarica_da_sheet, carica_su_sheet, invia_email_sistema, URL_INTERMEDIARIO_SILENZIOSO, df_istanze, genera_pdf_ordine_fornitore, carica_su_drive_unico, ID_CARTELLA_ORDINI)
-            else:
-                st.error("⚠️ Il file `gestione_preventivi.py` contiene errori bloccanti oppure non è stato caricato nella stessa cartella.")
-
-    # ==========================================
-    # WORKFLOW INTERNO: OPERATORI MAGAZZINI STANDARD
-    # ==========================================
-    elif st.session_state.ruolo_utente == "magazziniere":
-        st.markdown(f"## 📦 Magazzino Fisico: {st.session_state.magazzino_selezionato}")
-        tab1, tab2 = st.tabs(["📋 Tabella Inventario Scorte", "➕ Segnala Fabbisogno Mancante (Acquisti)"])
-        
-        with tab1:
-            st.dataframe(scarica_da_sheet(MAPPA_SCHEDE[st.session_state.magazzino_selezionato]["inventario"]), use_container_width=True, hide_index=True)
-            
-        with tab2:
-            st.markdown("### Segnala rotture di stock o materiale da acquistare")
-            with st.form("form_fabb_standard"):
-                mat = st.text_input("Descrizione materiale richiesto:")
-                qta = st.text_input("Quantità o pacchi stimati:")
-                note = st.text_area("Note vuote/urgenza:")
-                if st.form_submit_button("Invia Segnalazione Fabbisogno"):
-                    if mat.strip():
-                        df_rm = scarica_da_sheet("Richieste_Preventivo_Magazzino")
-                        id_rm = 2001 if df_rm.empty else int(pd.to_numeric(df_rm["id_richiesta_mag"], errors='coerce').max()) + 1
-                        nuovo = pd.DataFrame([{"id_richiesta_mag": id_rm, "data_creazione": datetime.now().strftime("%d/%m/%Y %H:%M"), "magazzino_origine": st.session_state.magazzino_selezionato, "materiale_richiesto": mat, "quantita_esimata": qta, "stato_iter": "In attesa di preventivi", "note": note}])
-                        carica_su_sheet(pd.concat([df_rm, nuovo], ignore_index=True), "Richieste_Preventivo_Magazzino")
-                        st.success(f"Richiesta inoltrata! ID REQ interna: {id_rm}")
+                        
+        with tab_scarico:
+            st.subheader("Registra prelievo di materiale dal magazzino")
+            if not df_inv.empty and "Descrizione materiale" in df_inv.columns:
+                lista_materiali_sc = df_inv["Descrizione materiale"].tolist()
+                scelta_mat_sc = st.selectbox("Seleziona il bene estratto:", lista_materiali_sc, key="scarico_sel")
+                riga_selezionata = df_inv[df_inv["Descrizione materiale"] == scelta_mat_sc].iloc[0]
+                giacenza_disponibile = int(riga_selezionata["Giacenza attuale"]) if "Giacenza attuale" in riga_selezionata else 0
+                
+                st.metric(label="Giacenza Attuale di Sicurezza", value=f"{giacenza_disponibile} unità")
+                qta_scarico = st.number_input("Quantità prelevata:", min_value=1, max_value=max(1, giacenza_disponibile), step=1)
+                destinatario_bene = st.text_input("Assegnatario / Aula / Destinazione d'uso:")
+                
+                if st.button("Esegui Scarico Merci", type="primary", use_container_width=True):
+                    if giacenza_disponibile < qta_scarico:
+                        st.error("Azione bloccata: quantità insufficiente a magazzino.")
+                    elif not destinatario_bene.strip():
+                        st.error("Specificare l'assegnatario del materiale.")
                     else:
+                        idx = df_inv.index[df_inv["Descrizione materiale"] == scelta_mat_sc].tolist()[0]
+                        df_inv.at[idx, "Giacenza attuale"] = giacenza_disponibile - qta_scarico
+                        df_inv.at[idx, "Ultimo aggiornamento"] = datetime.now().strftime("%d/%m/%Y %H:%M")
+                        carica_su_sheet(df_inv, nome_scheda_inv)
+                        st.success("Prelievo registrato e giacenze aggiornate!")
+                        st.rerun()
+                        
+        with tab_segnala:
+            st.subheader("🚨 Generazione Fabbisogno per l'Ufficio Acquisti")
+            
+            with st.form("form_segnalazione"):
+                materiale_urgente = st.text_input("Nome/Modello specifico del materiale mancante:")
+                qta_richiesta_assoluta = st.number_input("Quantità minima necessaria:", min_value=1, step=1)
+                note_urgenza = st.text_area("Note e specifiche tecniche aggiuntive per l'acquisto:")
+                
+                if st.form_submit_button("Invia Segnalazione in Amministrazione"):
+                    if not materiale_urgente.strip():
                         st.error("Specificare il materiale.")
+                    else:
+                        df_fabbisogni_globali = scarica_da_sheet("Richieste_Preventivo_Magazzino")
+                        if not df_fabbisogni_globali.empty and "id_richiesta_mag" in df_fabbisogni_globali.columns:
+                            id_req_num = pd.to_numeric(df_fabbisogni_globali["id_richiesta_mag"], errors='coerce')
+                            nuovo_id_req = 1001 if id_req_num.dropna().empty else int(id_req_num.max()) + 1
+                        else:
+                            nuovo_id_req = 1001
+                        
+                        nuovo_fabbisogno = pd.DataFrame([{
+                            "id_richiesta_mag": str(nuovo_id_req),
+                            "magazzino_origine": str(st.session_state.ruolo),
+                            "materiale_richiesto": str(materiale_urgente.strip()),
+                            "quantita_richiesta": str(qta_richiesta_assoluta),
+                            "data_segnalazione": datetime.now().strftime("%d/%m/%Y %H:%M"),
+                            "stato_iter": "In attesa di preventivi",
+                            "note_tecniche": str(note_urgenza.strip())
+                        }])
+                        
+                        carica_su_sheet(pd.concat([df_fabbisogni_globali, nuovo_fabbisogno], ignore_index=True), "Richieste_Preventivo_Magazzino")
+                        
+                        testo_mail = f"Nuova segnalazione di fabbisogno logistico dall'ISISS Scarpa.\n\nMagazzino Mittente: {st.session_state.ruolo}\nMateriale: {materiale_urgente.strip()}\nQuantità Richiesta: {qta_richiesta_assoluta}\nNote Tecniche: {note_urgenza}"
+                        invia_email_sistema(EMAIL_PRESIDE_TEST, f"🚨 NOTIFICA FABBISOGNO INSERITO - ID {nuovo_id_req}", testo_mail)
+                        
+                        st.success(f"Richiesta registrata ufficialmente con codice ID {nuovo_id_req}!")
