@@ -12,7 +12,7 @@ from email.mime.multipart import MIMEMultipart
 # --- IMPORTAZIONE MODULO ESTERNO PREVENTIVI ---
 import gestione_preventivi
 
-# --- CONFIGURAZIONE PAGINA (Tassativamente all'inizio) ---
+# --- CONFIGURAZIONE PAGINA ---
 st.set_page_config(page_title="Gestione Magazzini Scarpa", page_icon="🏢", layout="wide")
 
 # --- CONFIGURAZIONI SISTEMA ---
@@ -31,16 +31,15 @@ PASSWORD_MAP = {
 }
 PASSWORD_ADMIN = "admin99"
 
-MAPPA_SCHEDES = {
+MAPPA_SCHEDE = {
     "Personale ATA": {"inventario": "Inventario ata", "richieste": "Richieste ata"},
     "Officina": {"inventario": "Inventario officina", "richieste": "Richieste officina"},
     "Tecnici Informatici": {"inventario": "Inventario informatica", "richieste": "Richieste informatica"}
 }
 
-# Variable placeholder per istanze se richieste dai vecchi flussi
 df_istanze = pd.DataFrame()
 
-# --- IMPORTAZIONE SICURA LIBRERIE ---
+# --- IMPORTAZIONE LIBRERIE ---
 try:
     import gspread
     from google.oauth2 import service_account
@@ -55,11 +54,11 @@ except ImportError:
     FPDF_AVAILABLE = False
 
 
-# --- FUNZIONE DI PULIZIA STRINGHE PER FPDF (BLINDATA CHIRURGICAMENTE) ---
+# --- FIX CHIRURGICO ATTRIBUTEERROR SU NULL/NONE VALUES ---
 def pulisci_caratteri_fpdf(testo):
     if testo is None:
         return ""
-    testo = str(testo)  # Forza la conversione stringa eliminando ogni rischio di AttributeError
+    testo = str(testo)  # Protegge l'app convertendo forzatamente in stringa
     mappa = {
         '€': 'EUR', 'à': 'a\'', 'è': 'e\'', 'é': 'e\'', 
         'ì': 'i\'', 'ò': 'o\'', 'ù': 'u\'', '°': ' '
@@ -121,8 +120,6 @@ def carica_su_drive_unico(file_bytes, nome_file, mime_type, id_cartella):
     except Exception:
         return False
 
-
-# --- FUNZIONI STORICHE DI SERVIZIO (EMAIL SYSTEM) ---
 def invia_email_sistema(destinatario, oggetto, corpo_testo):
     if "smtp_settings" not in st.secrets:
         return False
@@ -144,7 +141,7 @@ def invia_email_sistema(destinatario, oggetto, corpo_testo):
         return False
 
 
-# --- ENGINE CORE GENERAZIONE PDF ORDINE ---
+# --- ENGINE GENERAZIONE PDF ORDINE ---
 def genera_pdf_ordine_fornitore(dati):
     if not FPDF_AVAILABLE:
         return b""
@@ -152,7 +149,6 @@ def genera_pdf_ordine_fornitore(dati):
     pdf.add_page()
     pdf.set_margins(15, 15, 15)
     
-    # Intestazione Scuola
     pdf.set_font("Arial", "B", 10)
     pdf.cell(0, 5, "ISISS JACOPO SCARPA", ln=True, align="L")
     pdf.set_font("Arial", "", 9)
@@ -160,7 +156,6 @@ def genera_pdf_ordine_fornitore(dati):
     pdf.cell(0, 5, "Cod. Fisc. 93011310265 - Tel. 0422 860012", ln=True, align="L")
     pdf.ln(10)
     
-    # Blocco Fornitore (Destra)
     pdf.set_x(110)
     pdf.set_font("Arial", "B", 10)
     pdf.cell(0, 5, "Spett.le Ditta:", ln=True)
@@ -170,7 +165,6 @@ def genera_pdf_ordine_fornitore(dati):
         pdf.cell(0, 5, pulisci_caratteri_fpdf(linea), ln=True)
     pdf.ln(15)
     
-    # Riferimenti Atto amministrativo
     pdf.set_font("Arial", "B", 11)
     pdf.cell(0, 6, f"OGGETTO: {pulisci_caratteri_fpdf(dati['oggetto_ordine'])}", ln=True)
     pdf.set_font("Arial", "", 10)
@@ -178,29 +172,27 @@ def genera_pdf_ordine_fornitore(dati):
     pdf.cell(0, 6, f"Determina di Affidamento: N. {dati['determina']} | Codice CIG Assegnato: {dati['cig']}", ln=True)
     pdf.ln(8)
     
-    # Condizioni
-    corpo = "Con la presente si formalizza l'affidamento diretto per la fornitura dei beni sotto elencati, alle condizioni economiche e di consegna concordate nel preventivo in epigrafe. La fatturazione dovra riportare tassativamente il codice CIG sopra indicato."
+    corpo = "Con la presente si formalizza l'affidamento diretto per la fornitura dei beni sotto elencati, alle condizioni economiche e di consegna concordate nel preventivo in epigrafe."
     pdf.multi_cell(0, 5, corpo)
     pdf.ln(8)
     
-    # Tabella Articoli Dettagliata
     pdf.set_font("Arial", "B", 9)
     pdf.cell(110, 7, "Descrizione Bene / Servizio", 1, 0, "L")
     pdf.cell(15, 7, "Q.ta", 1, 0, "C")
-    pdf.cell(25, 7, "Prezzo (IVA In.)", 1, 0, "R")
-    pdf.cell(25, 7, "Totale Riga", 1, 1, "R")
+    pdf.cell(25, 7, "Prezzo", 1, 0, "R")
+    pdf.cell(25, 7, "Totale", 1, 1, "R")
     
     pdf.set_font("Arial", "", 9)
     for art in dati["articoli"]:
-        # INTERVENTO CHIRURGICO: Fallback sicuro sulle chiavi per evitare AttributeError
-        desc_prodotto = art.get("descrizione", art.get("descrizione_materiale", ""))
+        # SUPPORTA SIA LA CHIAVE VECCHIA DEL REPO CHE QUELLA NUOVA SENZA CRASH
+        desc_prodotto = art.get("descrizione_materiale", art.get("descrizione", ""))
         pdf.cell(110, 7, pulisci_caratteri_fpdf(desc_prodotto), 1, 0, "L")
         pdf.cell(15, 7, str(art["quantita"]), 1, 0, "C")
         pdf.cell(25, 7, f"{art['prezzo_unitario']} EUR", 1, 0, "R")
         pdf.cell(25, 7, f"{art['totale_riga']} EUR", 1, 1, "R")
         
     pdf.set_font("Arial", "B", 10)
-    pdf.cell(150, 7, "TOTALITÀ FORNITURA IMPORTO IVATO COMPRESO:", 1, 0, "R")
+    pdf.cell(150, 7, "TOTALE FORNITURA:", 1, 0, "R")
     pdf.cell(25, 7, f"{dati['importo_ivato']} EUR", 1, 1, "R")
     pdf.ln(20)
     
@@ -232,7 +224,6 @@ if not st.session_state.autenticato:
         else:
             st.error("Chiave di sicurezza errata. Riprova.")
 else:
-    # Top Bar Utente
     c_user, c_logout = st.columns([8, 2])
     with c_user:
         st.info(f"Utente Connesso: **{st.session_state.ruolo}**")
@@ -242,9 +233,7 @@ else:
             st.session_state.ruolo = None
             st.rerun()
             
-    # --- SMISTAMENTO DELLE INTERFACCE IN BASE AL RUOLO ---
     if st.session_state.ruolo == "Amministrazione":
-        # CHIAMATA INTEGRALE AL MODULO ESTERNO
         gestione_preventivi.mostra_interfaccia_preventivi(
             scarica_da_sheet, 
             carica_su_sheet, 
@@ -257,11 +246,10 @@ else:
         )
         
     else:
-        # --- INTERFACCIA OPERATIVA STORICA PER I TRE MAGAZZINI (ATA, OFFICINA, TECNICI) ---
         st.title(f"🏢 Pannello Gestione Interna - {st.session_state.ruolo}")
         
-        nome_scheda_inv = MAPPA_SCHEDES[st.session_state.ruolo]["inventario"]
-        nome_scheda_req = MAPPA_SCHEDES[st.session_state.ruolo]["richieste"]
+        nome_scheda_inv = MAPPA_SCHEDE[st.session_state.ruolo]["inventario"]
+        nome_scheda_req = MAPPA_SCHEDE[st.session_state.ruolo]["richieste"]
         
         tab_stato, tab_carico, tab_scarico, tab_segnala = st.tabs([
             "📦 Inventario Attuale", 
@@ -321,7 +309,6 @@ else:
                         
         with tab_segnala:
             st.subheader("🚨 Generazione Fabbisogno per l'Ufficio Acquisti")
-            st.info("Utilizza questa funzione se un materiale è esaurito o sotto scorta. Verrà inserito automaticamente nel circuito dei preventivi dell'Amministrazione.")
             
             with st.form("form_segnalazione"):
                 materiale_urgente = st.text_input("Nome/Modello specifico del materiale mancante:")
@@ -351,4 +338,4 @@ else:
                         testo_mail = f"Nuova segnalazione di fabbisogno logistico dall'ISISS Scarpa.\n\nMagazzino Mittente: {st.session_state.ruolo}\nMateriale: {materiale_urgente.strip()}\nQuantità Richiesta: {qta_richiesta_assoluta}\nNote Tecniche: {note_urgenza}"
                         invia_email_sistema(EMAIL_PRESIDE_TEST, f"🚨 NOTIFICA FABBISOGNO INSERITO - ID {nuovo_id_req}", testo_mail)
                         
-                        st.success(f"Richiesta registrata ufficialmente con codice ID {nuovo_id_req}! L'Amministrazione è stata notificata.")
+                        st.success(f"Richiesta registrata ufficialmente con codice ID {nuovo_id_req}!")
