@@ -3,7 +3,7 @@ import pandas as pd
 from datetime import datetime
 import json
 
-def mostra_area_preventivi_interna(scarica_da_sheet, carica_su_sheet, genera_pdf_ordine_fornitore, carica_su_drive_unico, ID_CARTELLA_ORDINI):
+def mostra_interfaccia_preventivi(scarica_da_sheet, carica_su_sheet, genera_pdf_ordine_fornitore, carica_su_drive_unico, ID_CARTELLA_ORDINI):
     st.markdown("## 📊 Hub Gestione Fornitori & Tracciabilità Preventivi")
     
     tab_richieste, tab_rubrica, tab_inserimento, tab_registro_finito = st.tabs([
@@ -17,7 +17,7 @@ def mostra_area_preventivi_interna(scarica_da_sheet, carica_su_sheet, genera_pdf
     df_preventivi = scarica_da_sheet("Registro_Preventivi")
     df_fornitori = scarica_da_sheet("Anagrafica_Fornitori")
     
-    # --- ASSICURA STRUTTURA COLONNE MINIME (Previene KeyError) ---
+    # --- PREVENZIONE KEYERROR: INIZIALIZZAZIONE STRUTTURE COLONNE ---
     if not df_preventivi.empty:
         for col in ["id_preventivo", "id_richiesta_mag", "fornitore", "importo_ivato", "stato_approvazione", "note", "cig", "determina"]:
             if col not in df_preventivi.columns: df_preventivi[col] = ""
@@ -81,7 +81,7 @@ def mostra_area_preventivi_interna(scarica_da_sheet, carica_su_sheet, genera_pdf
         if df_fabbisogni_attivi.empty:
             st.warning("Per inserire un preventivo deve essere presente almeno un fabbisogno aperto.")
         elif df_fornitori_attivi.empty:
-            st.error("⚠️ Non hai ancora fornitori in rubrica!")
+            st.error("⚠️ Non hai ancora fornitori in rubrica! Vai nella Tab dedicata per censire il primo.")
         else:
             lista_fabbisogni = [f"ID {r['id_richiesta_mag']} - {r['materiale_richiesto']} ({r['magazzino_origine']})" for _, r in df_fabbisogni_attivi.iterrows()]
             scelta_fabb = st.selectbox("Seleziona il fabbisogno d'origine:", lista_fabbisogni)
@@ -111,10 +111,10 @@ def mostra_area_preventivi_interna(scarica_da_sheet, carica_su_sheet, genera_pdf
                         "determina": ""
                     }])
                     carica_su_sheet(pd.concat([df_preventivi, nuovo_prev_df], ignore_index=True), "Registro_Preventivi")
-                    st.success(f"Preventivo ID {id_prev_nuovo} salvato!")
+                    st.success(f"Preventivo ID {id_prev_nuovo} salvato con successo!")
                     st.rerun()
                         
-    # --- TAB 4: DETTAGLIO ARTICOLI ---
+    # --- TAB 4: STOCASTICA E LETTERA D'ORDINE ---
     with tab_registro_finito:
         st.markdown("### Valutazione, Dettaglio Articoli ed Emissione Lettera d'Ordine")
         df_preventivi_validi = df_preventivi[df_preventivi["id_preventivo"].astype(str).str.strip() != ""] if not df_preventivi.empty else pd.DataFrame()
@@ -127,7 +127,7 @@ def mostra_area_preventivi_interna(scarica_da_sheet, carica_su_sheet, genera_pdf
             
             preventivi_valutabili = df_preventivi_validi[df_preventivi_validi["stato_approvazione"] == "In valutazione"]
             if preventivi_valutabili.empty:
-                st.info("Tutti i preventivi inseriti sono già stati elaborati.")
+                st.info("Tutti i preventivi inseriti sono già stati elaborati o approvati.")
             else:
                 st.markdown("#### ⚙️ Configura Voci di Dettaglio ed Emetti Ordine")
                 opzioni_preventivo = [f"PREV ID {p['id_preventivo']} - {p['fornitore'].splitlines()[0]} (€ {p['importo_ivato']})" for _, p in preventivi_valutabili.iterrows()]
