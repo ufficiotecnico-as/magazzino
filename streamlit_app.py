@@ -179,9 +179,16 @@ class PDFMinisteriale(FPDF):
         self.cell(180, 4, pulisci_caratteri_fpdf(footer_text), ln=True, align="C")
 
 def pulisci_caratteri_fpdf(testo):
-    mappa = { "à": "a'", "á": "a'", "è": "e'", "é": "e'", "ì": "i'", "ò": "o'", "ù": "u'", "€": "EUR" }
-    for k, v in mappa.items(): testo = testo.replace(k, v)
-    return testo.encode('raw_unicode_escape').decode('utf-8').encode('latin1', 'replace').decode('latin1')
+    if testo is None:
+        return ""
+    testo = str(testo)  # Forza la conversione in stringa per evitare AttributeError
+    mappa = {
+        '€': 'EUR', 'à': 'a\'', 'è': 'e\'', 'é': 'e\'', 
+        'ì': 'i\'', 'ò': 'o\'', 'ù': 'u\'', '°': ' '
+    }
+    for k, v in mappa.items(): 
+        testo = testo.replace(k, v)
+    return testo
 
 def genera_pdf_comodato(id_contratto, nome, ruolo, bene, data, tipo_operazione="Consegna", firma_base64=None, utente_loggato="Ufficio Tecnico"):
     if not FPDF_AVAILABLE: return b"Errore PDF"
