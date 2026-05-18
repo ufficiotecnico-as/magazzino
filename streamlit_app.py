@@ -1,331 +1,219 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
-import io
-import base64
-import json
-import requests
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 
-# --- IMPORTAZIONE MODULO ESTERNO PREVENTIVI ---
-import gestione_preventivi
-
-# --- CONFIGURAZIONE PAGINA (Tassativamente all'inizio) ---
-st.set_page_config(page_title="Gestione Magazzini Scarpa", page_icon="🏢", layout="wide")
-
-# --- CONFIGURAZIONI SISTEMA ---
-URL_INTERMEDIARIO_SILENZIOSO = "https://script.google.com/macros/s/AKfycbyXBLjDpJrSGHoUpuspTsNAG9f6lGhF1e8oGyJ8nkY6jZMTJo04zsT_6eLyEybGgv4/exec"
-ID_CARTELLA_CONSEGNE = "1pJpYtIfcMEKFh62rSOGTXWYG8CgvzN4m"
-ID_CARTELLA_RICONSEGNE = "1S6IcauDOc-8sFiCdGv67CHKf_H9u7BVW"
-ID_CARTELLA_ORDINI = "1bVTs2smvVJONs2oIAFZdDvX9pYDK9MZT"  
-SPREADSHEET_ID = "1Q91H_TULvpsnPcyOwQ1lxmjOf809xp4cUz9p1EdMc-4"
-URL_LOGO = "https://cspace.spaggiari.eu//pub/TVII0004/TVII0004-intestazione-nuova-senzaloghi.png?_t=1712923868"
-EMAIL_PRESIDE_TEST = "marcobrunetti14@gmail.com"
-
-PASSWORD_MAP = {
-    "ata2026": "Personale ATA",
-    "officina2026": "Officina",
-    "tecnici2026": "Tecnici Informatici"
-}
-PASSWORD_ADMIN = "admin99"
-
-MAPPA_SCHEDE = {
-    "Personale ATA": {"inventario": "Inventario ata", "richieste": "Richieste ata"},
-    "Officina": {"inventario": "Inventario officina", "richieste": "Richieste officina"},
-    "Tecnici Informatici": {"inventario": "Inventario informatica", "richieste": "Richieste informatica"}
-}
-
-# --- IMPORTAZIONE SICURA LIBRERIE ---
-try:
-    import gspread
-    from google.oauth2 import service_account
-    GSPREAD_AVAILABLE = True
-except ImportError:
-    GSPREAD_AVAILABLE = False
-
-try:
-    from fpdf import FPDF
-    FPDF_AVAILABLE = True
-except ImportError:
-    FPDF_AVAILABLE = False
-
-
-# --- CORE GOOGLE CONNECTIONS ---
-@st.cache_resource(ttl=5)
-def connetti_google_sheets():
-    if not GSPREAD_AVAILABLE or "google_creds" not in st.secrets: 
-        return None
-    try:
-        creds_info = dict(st.secrets["google_creds"])
-        if "private_key" in creds_info: 
-            creds_info["private_key"] = creds_info["private_key"].replace("\\n", "\n").strip()
-        scopes = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
-        creds = service_account.Credentials.from_service_account_info(creds_info, scopes=scopes)
-        return gspread.authorize(creds).open_by_key(SPREADSHEET_ID)
-    except Exception: 
-        return None
-
-def scarica_da_sheet(nome_scheda):
-    sh = connetti_google_sheets()
-    if sh is not None:
-        try:
-            ws = sh.worksheet(nome_scheda)
-            records = ws.get_all_records()
-            return pd.DataFrame(records) if records else pd.DataFrame()
-        except Exception:
-            return pd.DataFrame()
-    return pd.DataFrame()
-
-def carica_su_sheet(df, nome_scheda):
-    sh = connetti_google_sheets()
-    if sh is not None:
-        try:
-            ws = sh.worksheet(nome_scheda)
-            ws.clear()
-            df_filled = df.fillna("")
-            ws.update([df_filled.columns.values.tolist()] + df_filled.values.tolist())
-            return True
-        except Exception:
-            return False
-    return False
-
-def carica_su_drive_unico(file_bytes, nome_file, mime_type, id_cartella):
-    try:
-        payload = {
-            "nomeFile": nome_file,
-            "mimeType": mime_type,
-            "cartellaId": id_cartella,
-            "fileB64": base64.b64encode(file_bytes).decode("utf-8")
-        }
-        res = requests.post(URL_INTERMEDIARIO_SILENZIOSO, json=payload, timeout=30)
-        return res.status_code == 200
-    except Exception:
-        return False
-
-
-# --- FUNZIONI STORICHE DI SERVIZIO (EMAIL & PDF FORNITORE) ---
-def invia_email_sistema(destinatario, oggetto, corpo_testo):
-    if "smtp_settings" not in st.secrets:
-        return False
-    try:
-        conf = st.secrets["smtp_settings"]
-        msg = MIMEMultipart()
-        msg['From'] = conf["smtp_username"]
-        msg['To'] = destinatario
-        msg['Subject'] = oggetto
-        msg.attach(MIMEText(corpo_testo, 'plain', 'utf-8'))
-        
-        server = smtplib.SMTP(conf["smtp_server"], int(conf["smtp_port"]))
-        server.starttls()
-        server.login(conf["smtp_username"], conf["smtp_password"])
-        server.sendmail(conf["smtp_username"], destinatario, msg.as_string())
-        server.quit()
-        return True
-    except Exception:
-        return False
-
-def genera_pdf_ordine_fornitore(dati):
-    if not FPDF_AVAILABLE:
-        return b""
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_margins(15, 15, 15)
+def mostra_interfaccia_preventivi(scarica_da_sheet, carica_su_sheet, invia_email_sistema, url_intermediario, df_istanze, genera_pdf_ordine_fornitore=None, carica_su_drive_unico=None, id_cartella_ordini=None):
+    st.markdown("## 📊 Hub Gestione Fornitori & Tracciabilità Preventivi")
     
-    # Intestazione Scuola
-    pdf.set_font("Arial", "B", 10)
-    pdf.cell(0, 5, "ISISS JACOPO SCARPA", ln=True, align="L")
-    pdf.set_font("Arial", "", 9)
-    pdf.cell(0, 5, "Via Pieve di Soligo, 3 - 31045 Motta di Livenza (TV)", ln=True, align="L")
-    pdf.cell(0, 5, "Cod. Fisc. 93011310265 - Tel. 0422 860012", ln=True, align="L")
-    pdf.ln(10)
+    tab_richieste, tab_rubrica, tab_inserimento, tab_registro_finito = st.tabs([
+        "📥 Fabbisogni dai Magazzini",
+        "📙 Rubrica Anagrafica Fornitori", 
+        "✍️ Inserisci Offerta / Preventivo Ricevuto", 
+        "📜 Registro Storico Preventivi"
+    ])
     
-    # Blocco Fornitore (Destra)
-    pdf.set_x(110)
-    pdf.set_font("Arial", "B", 10)
-    pdf.cell(0, 5, "Spett.le Ditta:", ln=True)
-    for linea in dati["fornitore"].splitlines():
-        pdf.set_x(110)
-        pdf.set_font("Arial", "", 10)
-        pdf.cell(0, 5, linea, ln=True)
-    pdf.ln(15)
+    df_fabbisogni = scarica_da_sheet("Richieste_Preventivo_Magazzino")
+    df_preventivi = scarica_da_sheet("Registro_Preventivi")
+    df_fornitori = scarica_da_sheet("Anagrafica_Fornitori")
     
-    # Riferimenti Atto amministrativo
-    pdf.set_font("Arial", "B", 11)
-    pdf.cell(0, 6, f"OGGETTO: {dati['oggetto_ordine']}", ln=True)
-    pdf.set_font("Arial", "", 10)
-    pdf.cell(0, 6, f"Riferimento Vs. Preventivo del: {dati['data_preventivo']} | Nostro Protocollo Ingresso: {dati['protocollo_istituto']}", ln=True)
-    pdf.cell(0, 6, f"Determina di Affidamento: N. {dati['determina']} | Codice CIG Assegnato: {dati['cig']}", ln=True)
-    pdf.ln(8)
-    
-    # Condizioni
-    corpo = "Con la presente si formalizza l'affidamento diretto per la fornitura dei beni sotto elencati, alle condizioni economiche e di consegna concordate nel preventivo in epigrafe. La fatturazione dovrà riportare tassativamente il codice CIG sopra indicato."
-    pdf.multi_cell(0, 5, corpo)
-    pdf.ln(8)
-    
-    # Tabella Articoli Dettagliata
-    pdf.set_font("Arial", "B", 9)
-    pdf.cell(100, 7, "Descrizione Bene / Servizio", 1, 0, "L")
-    pdf.cell(20, 7, "Q.ta", 1, 0, "C")
-    pdf.cell(30, 7, "Prezzo (IVA In.)", 1, 0, "R")
-    pdf.cell(30, 7, "Totale Riga", 1, 1, "R")
-    
-    pdf.set_font("Arial", "", 9)
-    for art in dati["articoli"]:
-        pdf.cell(100, 6, str(art["descrizione"])[:50], 1, 0, "L")
-        pdf.cell(20, 6, str(art["quantita"]), 1, 0, "C")
-        pdf.cell(30, 6, f"{art['prezzo_unitario']} €", 1, 0, "R")
-        pdf.cell(30, 6, f"{art['totale_riga']} €", 1, 1, "R")
-        
-    pdf.set_font("Arial", "B", 10)
-    pdf.cell(150, 7, "TOTALE FORNITURA IMPORTO IVATO COMPRESO:", 1, 0, "R")
-    pdf.cell(30, 7, f"{dati['importo_ivato']} €", 1, 1, "R")
-    pdf.ln(20)
-    
-    pdf.cell(90, 5, "Il Direttore dei Servizi Gen. Amm.vi", 0, 0, "C")
-    pdf.cell(90, 5, "Il Dirigente Scolastico", 0, 1, "C")
-    
-    return pdf.output(dest="S").encode("latin-1", errors="ignore")
-
-
-# --- ROUTING DI AUTENTICAZIONE ---
-if "autenticato" not in st.session_state:
-    st.session_state.autenticato = False
-    st.session_state.ruolo = None
-
-if not st.session_state.autenticato:
-    st.image(URL_LOGO, use_container_width=True)
-    st.markdown("<h2 style='text-align: center;'>🔑 Accesso Sicuro Sistema Logistico</h2>", unsafe_allow_html=True)
-    
-    password = st.text_input("Inserisci la password di dipartimento o amministrativa:", type="password")
-    if st.button("Effettua il Login", use_container_width=True):
-        if password in PASSWORD_MAP:
-            st.session_state.autenticato = True
-            st.session_state.ruolo = PASSWORD_MAP[password]
-            st.rerun()
-        elif password == PASSWORD_ADMIN:
-            st.session_state.autenticato = True
-            st.session_state.ruolo = "Amministrazione"
-            st.rerun()
+    # ---------------------------------------------------------
+    # TAB 1: FABBISOGNI
+    # ---------------------------------------------------------
+    with tab_richieste:
+        st.markdown("### Elenco materiali segnalati dai capigruppo logistici")
+        if df_fabbisogni.empty or len(df_fabbisogni) == 0:
+            st.info("Nessuna segnalazione di fabbisogno aperta al momento.")
         else:
-            st.error("Chiave di sicurezza errata. Riprova.")
-else:
-    # Top Bar Utente
-    c_user, c_logout = st.columns([8, 2])
-    with c_user:
-        st.info(f"Utente Connesso: **{st.session_state.ruolo}**")
-    with c_logout:
-        if st.button("🚪 Esci dal Sistema", use_container_width=True):
-            st.session_state.autenticato = False
-            st.session_state.ruolo = None
-            st.rerun()
+            st.dataframe(df_fabbisogni, use_container_width=True, hide_index=True)
             
-    # --- SMISTAMENTO DELLE INTERFACCE IN BASE AL RUOLO ---
-    if st.session_state.ruolo == "Amministrazione":
-        # Chiama l'interfaccia protetta dentro il file esterno
-        gestione_preventivi.mostra_interfaccia_preventivi(
-            scarica_da_sheet, 
-            carica_su_sheet, 
-            genera_pdf_ordine_fornitore, 
-            carica_su_drive_unico, 
-            ID_CARTELLA_ORDINI
-        )
+    # ---------------------------------------------------------
+    # TAB 2: RUBRICA ANAGRAFICA FORNITORI
+    # ---------------------------------------------------------
+    with tab_rubrica:
+        st.markdown("### 📙 Gestione Rubrica Fornitori d'Istituto")
         
-    else:
-        # --- INTERFACCIA OPERATIVA STORICA PER I TRE MAGAZZINI (ATA, OFFICINA, TECNICI) ---
-        st.title(f"🏢 Pannello Gestione Interna - {st.session_state.ruolo}")
-        
-        nome_scheda_inv = MAPPA_SCHEDES[st.session_state.ruolo]["inventario"]
-        nome_scheda_req = MAPPA_SCHEDES[st.session_state.ruolo]["richieste"]
-        
-        tab_stato, tab_carico, tab_scarico, tab_segnala = st.tabs([
-            "📦 Inventario Attuale", 
-            "📥 Carico Nuove Merci", 
-            "📤 Scarico / Assegnazione Bene",
-            "🚨 Segnala Fabbisogno Esaurito"
-        ])
-        
-        df_inv = scarica_da_sheet(nome_scheda_inv)
-        
-        with tab_stato:
-            st.subheader("Disponibilità Materiali Real-Time")
-            if df_inv.empty:
-                st.warning("Inventario vuoto o non accessibile.")
-            else:
-                st.dataframe(df_inv, use_container_width=True, hide_index=True)
+        with st.expander("➕ Salva un nuovo Fornitore in Rubrica", expanded=False):
+            with st.form("form_nuovo_fornitore"):
+                rag_soc = st.text_input("Ragione Sociale / Denominazione Ditta:")
+                p_iva = st.text_input("Partita IVA / Codice Fiscale Fornitore:")
+                indirizzo_completo = st.text_input("Indirizzo Sede Legale (Via, CAP, Città, Prov):")
+                email_cont = st.text_input("Email o PEC di contatto:")
                 
-        with tab_carico:
-            st.subheader("Registra un incremento di materiale a magazzino")
-            if not df_inv.empty:
-                lista_materiali = df_inv["Descrizione materiale"].tolist()
-                scelta_mat = st.selectbox("Seleziona il bene da caricare:", lista_materiali, key="carico_sel")
-                qta_carico = st.number_input("Quantità in ingresso:", min_value=1, step=1)
-                
-                if st.button("Conferma Carico Merci", use_container_width=True):
-                    idx = df_inv.index[df_inv["Descrizione materiale"] == scelta_mat].tolist()[0]
-                    df_inv.at[idx, "Giacenza attuale"] = int(df_inv.at[idx, "Giacenza attuale"]) + qta_carico
-                    df_inv.at[idx, "Ultimo aggiornamento"] = datetime.now().strftime("%d/%m/%Y %H:%M")
-                    if carica_su_sheet(df_inv, nome_scheda_inv):
-                        st.success("Inventario aggiornato con successo!")
-                        st.rerun()
-                        
-        with tab_scarico:
-            st.subheader("Registra prelievo di materiale dal magazzino")
-            if not df_inv.empty:
-                lista_materiali_sc = df_inv["Descrizione materiale"].tolist()
-                scelta_mat_sc = st.selectbox("Seleziona il bene estratto:", lista_materiali_sc, key="scarico_sel")
-                riga_selezionata = df_inv[df_inv["Descrizione materiale"] == scelta_mat_sc].iloc[0]
-                giacenza_disponibile = int(riga_selezionata["Giacenza attuale"])
-                
-                st.metric(label="Giacenza Attuale di Sicurezza", value=f"{giacenza_disponibile} unità")
-                qta_scarico = st.number_input("Quantità prelevata:", min_value=1, max_value=max(1, giacenza_disponibile), step=1)
-                destinatario_bene = st.text_input("Assegnatario / Aula / Destinazione d'uso:")
-                
-                if st.button("Esegui Scarico Merci", type="primary", use_container_width=True):
-                    if giacenza_disponibile < qta_scarico:
-                        st.error("Azione bloccata: quantità insufficiente a magazzino.")
-                    elif not destinatario_bene.strip():
-                        st.error("Specificare l'assegnatario del materiale.")
+                if st.form_submit_button("💾 Salva Fornitore in Rubrica", use_container_width=True):
+                    if not rag_soc.strip() or not p_iva.strip():
+                        st.error("I campi Ragione Sociale e Partita IVA sono obbligatori per il censimento.")
                     else:
-                        idx = df_inv.index[df_inv["Descrizione materiale"] == scelta_mat_sc].tolist()[0]
-                        df_inv.at[idx, "Giacenza attuale"] = giacenza_disponibile - qta_scarico
-                        df_inv.at[idx, "Ultimo aggiornamento"] = datetime.now().strftime("%d/%m/%Y %H:%M")
-                        carica_su_sheet(df_inv, nome_scheda_inv)
-                        st.success("Prelievo registrato e giacenze aggiornate!")
-                        st.rerun()
+                        id_forn_num = pd.to_numeric(df_fornitori["id_fornitore"], errors='coerce')
+                        id_forn = int(id_forn_num.max() + 1) if not df_fornitori.empty and not id_forn_num.dropna().empty else 1
                         
-        with tab_segnala:
-            st.subheader("🚨 Generazione Fabbisogno per l'Ufficio Acquisti")
-            st.info("Utilizza questa funzione se un materiale è esaurito o sotto scorta. Verrà inserito automaticamente nel circuito dei preventivi dell'Amministrazione.")
-            
-            with st.form("form_segnalazione"):
-                materiale_urgente = st.text_input("Nome/Modello specifico del materiale mancante:")
-                qta_richiesta_assoluta = st.number_input("Quantità minima stimata necessaria:", min_value=1, step=1)
-                note_urgenza = st.text_area("Note e specifiche tecniche aggiuntive per l'acquisto:")
-                
-                if st.form_submit_button("Invia Segnalazione in Amministrazione"):
-                    if not materiale_urgente.strip():
-                        st.error("Specificare il materiale.")
-                    else:
-                        df_fabbisogni_globali = scarica_da_sheet("Richieste_Preventivo_Magazzino")
-                        id_req_num = pd.to_numeric(df_fabbisogni_globali["id_richiesta_mag"], errors='coerce')
-                        nuovo_id_req = 1001 if df_fabbisogni_globali.empty or id_req_num.dropna().empty else int(id_req_num.max()) + 1
-                        
-                        nuovo_fabbisogno = pd.DataFrame([{
-                            "id_richiesta_mag": str(nuovo_id_req),
-                            "magazzino_origine": str(st.session_state.ruolo),
-                            "materiale_richiesto": str(materiale_urgente.strip()),
-                            "quantita_richiesta": str(qta_richiesta_assoluta),
-                            "data_segnalazione": datetime.now().strftime("%d/%m/%Y %H:%M"),
-                            "stato_iter": "In attesa di preventivi",
-                            "note_tecniche": str(note_urgenza.strip())
+                        nuovo_forn_df = pd.DataFrame([{
+                            "id_fornitore": str(id_forn),
+                            "ragione_sociale": str(rag_soc.strip()),
+                            "partita_iva": str(p_iva.strip()),
+                            "indirizzo": str(indirizzo_completo.strip()),
+                            "email_contatto": str(email_cont.strip())
                         }])
+                        df_fornitori = pd.concat([df_fornitori, nuovo_forn_df], ignore_index=True)
+                        carica_su_sheet(df_fornitori, "Anagrafica_Fornitori")
+                        st.success(f"Ditta '{rag_soc.strip()}' registrata in rubrica!")
+                        st.rerun()
                         
-                        carica_su_sheet(pd.concat([df_fabbisogni_globali, nuovo_fabbisogno], ignore_index=True), "Richieste_Preventivo_Magazzino")
+        df_fornitori_attivi = df_fornitori[df_fornitori["ragione_sociale"].get(df_fornitori["ragione_sociale"] != "").any() if not df_fornitori.empty else False]
+        df_fornitori_attivi = df_fornitori[df_fornitori["ragione_sociale"].astype(str).str.strip() != ""] if not df_fornitori.empty else pd.DataFrame()
+
+        if df_fornitori_attivi.empty:
+            st.info("Nessun fornitore salvato in rubrica. Aggiungine uno sopra per evitare di digitarlo a mano.")
+        else:
+            st.markdown("#### Aziende Censite a Registro")
+            st.dataframe(df_fornitori_attivi, use_container_width=True, hide_index=True)
+            
+            elenco_cancellabili = [f"{f['id_fornitore']} - {f['ragione_sociale']}" for _, f in df_fornitori_attivi.iterrows()]
+            da_eliminare = st.selectbox("Seleziona eventuale ditta da rimuovere:", [""] + elenco_cancellabili)
+            if da_eliminare and st.button("🗑️ Rimuovi Fornitore Selezionato", type="secondary"):
+                id_da_rim = da_eliminare.split(" - ")[0]
+                df_fornitori = df_fornitori[df_fornitori["id_fornitore"].astype(str) != str(id_da_rim)]
+                carica_su_sheet(df_fornitori, "Anagrafica_Fornitori")
+                st.success("Fornitore rimosso dalla rubrica.")
+                st.rerun()
+
+    # ---------------------------------------------------------
+    # TAB 3: INSERIMENTO PREVENTIVO CON PRECOMPILAZIONE
+    # ---------------------------------------------------------
+    with tab_inserimento:
+        st.markdown("### Collega un preventivo economico a una richiesta interna")
+        
+        if df_fabbisogni.empty:
+            st.warning("Per inserire un preventivo deve essere presente almeno un fabbisogno aperto.")
+        elif df_fornitori_attivi.empty:
+            st.error("⚠️ Non hai ancora fornitori in rubrica! Vai nella scheda '📙 Rubrica Anagrafica Fornitori' e inserisci almeno un'azienda prima di continuare.")
+        else:
+            lista_fabbisogni = [f"ID {r['id_richiesta_mag']} - {r['materiale_richiesto']} ({r['magazzino_origine']})" for _, r in df_fabbisogni.iterrows()]
+            scelta_fabb = st.selectbox("Seleziona il fabbisogno d'origine:", lista_fabbisogni)
+            id_fabb_scelto = scelta_fabb.split(" - ")[0].replace("ID ", "").strip()
+            
+            with st.form("form_aggiunta_preventivo"):
+                st.markdown("##### 🏢 Selezione Fornitore da Rubrica")
+                
+                # Mappa dizionario per evitare l'uso di .iloc rischioso sugli indici sballati
+                mappa_nomi = {}
+                opzioni_rubrica = []
+                for _, f in df_fornitori_attivi.iterrows():
+                    testo_chiave = f"{f['ragione_sociale']} (P.IVA: {f['partita_iva']})"
+                    opzioni_rubrica.append(testo_chiave)
+                    mappa_nomi[testo_chiave] = f
+                
+                fornitore_selezionato_rubrica = st.selectbox("Scegli la ditta (prenderà i dati in automatico):", opzioni_rubrica)
+                importo_lordo = st.number_input("Importo Totale IVATO (€):", min_value=0.0, step=0.01)
+                note_preventivo = st.text_area("Note aggiuntive / Condizioni di consegna:")
+                
+                if st.form_submit_button("Registra preventivo a sistema"):
+                    f_dati = mappa_nomi[fornitore_selezionato_rubrica]
+                    
+                    blocco_spett_le = f"{f_dati['ragione_sociale']}\nSede Legale: {f_dati['indirizzo']}\nP.IVA / C.F.: {f_dati['partita_iva']}\nContatto: {f_dati['email_contatto']}"
+                    
+                    id_prev_num = pd.to_numeric(df_preventivi["id_preventivo"], errors='coerce')
+                    id_prev_nuovo = 501 if df_preventivi.empty or id_prev_num.dropna().empty else int(id_prev_num.max()) + 1
+                    
+                    nuovo_prev_df = pd.DataFrame([{
+                        "id_preventivo": str(id_prev_nuovo),
+                        "id_richiesta_mag": str(id_fabb_scelto),
+                        "fornitore": blocco_spett_le,
+                        "importo_ivato": f"{importo_lordo:.2f}",
+                        "data_inserimento": datetime.now().strftime("%d/%m/%Y %H:%M"),
+                        "stato_approvazione": "In valutazione",
+                        "note": note_preventivo.strip(),
+                        "cig": "",
+                        "determina": ""
+                    }])
+                    carica_su_sheet(pd.concat([df_preventivi, nuovo_prev_df], ignore_index=True), "Registro_Preventivi")
+                    st.success(f"Preventivo ID {id_prev_nuovo} salvato con successo! Nessun inserimento manuale eseguito.")
+                    st.rerun()
                         
-                        # Email automatica di notifica al Preside/Amministrazione
-                        testo_mail = f"Nuova segnalazione di fabbisogno logistico dall'ISISS Scarpa.\n\nMagazzino Mittente: {st.session_state.ruolo}\nMateriale: {materiale_urgente.strip()}\nQuantità Richiesta: {qta_richiesta_assoluta}\nNote Tecniche: {note_urgenza}"
-                        invia_email_sistema(EMAIL_PRESIDE_TEST, f"🚨 NOTIFICA FABBISOGNO INSERITO - ID {nuovo_id_req}", testo_mail)
+    # ---------------------------------------------------------
+    # TAB 4: EMISSIONE LETTERA D'ORDINE MINISTERI
+    # ---------------------------------------------------------
+    with tab_registro_finito:
+        st.markdown("### Valutazione, Approvazione ed Emissione Lettera d'Ordine")
+        
+        # Filtro protetto contro le celle vuote introdotte dall'allineamento automatico
+        df_preventivi_validi = df_preventivi[df_preventivi["id_preventivo"].astype(str).str.strip() != ""] if not df_preventivi.empty else pd.DataFrame()
+        
+        if df_preventivi_validi.empty:
+            st.info("Nessun preventivo registrato a storico.")
+        else:
+            st.dataframe(df_preventivi_validi, use_container_width=True, hide_index=True)
+            st.markdown("---")
+            
+            preventivi_valutabili = df_preventivi_validi[df_preventivi_validi["stato_approvazione"] == "In valutazione"]
+            if preventivi_valutabili.empty:
+                st.info("Tutti i preventivi inseriti sono già stati lavorati o emessi.")
+            else:
+                st.markdown("#### ⚙️ Compila Dati Ministeriali ed Emetti Ordine")
+                opzioni_preventivo = [f"PREV ID {p['id_preventivo']} - {p['fornitore'].splitlines()[0]} (€ {p['importo_ivato']})" for _, p in preventivi_valutabili.iterrows()]
+                scelta_p = st.selectbox("Seleziona il preventivo da deliberare ed ordinare:", opzioni_preventivo)
+                id_p_scelto = scelta_p.split(" - ")[0].replace("PREV ID ", "").strip()
+                
+                riga_p = df_preventivi_validi[df_preventivi_validi["id_preventivo"].astype(str) == str(id_p_scelto)].iloc[0]
+                
+                st.markdown("##### 📄 Dati per Atto d'Ordine d'Istituto")
+                c1, c2 = st.columns(2)
+                with c1:
+                    cig_input = st.text_input("Codice CIG (Legge 136/2010):", placeholder="Es. Z1A3C4D5E6")
+                    determina_input = st.text_input("Numero/Anno Determina:", placeholder="Es. 145/2026")
+                    data_prev_forn = st.text_input("Data di invio preventivo ditta:", value=datetime.now().strftime("%d/%m/%Y"))
+                with c2:
+                    prot_forn = st.text_input("Protocollo ditta mittente (se presente):", value="N.D.")
+                    prot_inst = st.text_input("Protocollo ingresso ISISS Scarpa:", placeholder="Es. 0004120/E")
+                    qta_input = st.number_input("Quantità complessiva colli/beni:", min_value=1, value=1)
+                
+                riga_fabb = df_fabbisogni[df_fabbisogni["id_richiesta_mag"].astype(str) == str(riga_p["id_richiesta_mag"])] if not df_fabbisogni.empty else pd.DataFrame()
+                materiale_desc = riga_fabb.iloc[0]["materiale_richiesto"] if not riga_fabb.empty else "Fornitura Beni da Magazzino"
+                
+                if st.button("🔴 COMPLETA E INVIA PREVENTIVO A REGISTRO", type="primary", use_container_width=True):
+                    if not cig_input.strip() or not determina_input.strip() or not prot_inst.strip():
+                        st.error("Impossibile procedere: CIG, Determina e Protocollo dell'Istituto sono campi obbligatori.")
+                    else:
+                        mappa_dati_pdf = {
+                            "fornitore": riga_p["fornitore"],
+                            "oggetto_ordine": f"Affidamento directo fornitura materiale d'istituto - Richiesta Magazzino ID {riga_p['id_richiesta_mag']}",
+                            "data_preventivo": data_prev_forn,
+                            "protocollo_fornitore": prot_forn,
+                            "protocollo_istituto": prot_inst,
+                            "descrizione_materiale": materiale_desc,
+                            "quantita": qta_input,
+                            "importo_ivato": riga_p["importo_ivato"],
+                            "cig": cig_input.strip().upper(),
+                            "determina": determina_input.strip()
+                        }
                         
-                        st.success(f"Richiesta registrata ufficialmente con codice ID {nuovo_id_req}! L'Amministrazione è stata notificata.")
+                        idx_p = df_preventivi.index[df_preventivi["id_preventivo"].astype(str) == str(id_p_scelto)].tolist()[0]
+                        df_preventivi.at[idx_p, "stato_approvazione"] = "Approvato ed Emesso"
+                        df_preventivi.at[idx_p, "cig"] = cig_input.strip().upper()
+                        df_preventivi.at[idx_p, "determina"] = determina_input.strip()
+                        carica_su_sheet(df_preventivi, "Registro_Preventivi")
+                        
+                        if not riga_fabb.empty:
+                            idx_f = df_fabbisogni.index[df_fabbisogni["id_richiesta_mag"].astype(str) == str(riga_p["id_richiesta_mag"])].tolist()[0]
+                            df_fabbisogni.at[idx_f, "stato_iter"] = "Ordinato / Evaso"
+                            carica_su_sheet(df_fabbisogni, "Richieste_Preventivo_Magazzino")
+                        
+                        if genera_pdf_ordine_fornitore and carica_su_drive_unico:
+                            pdf_bytes = genera_pdf_ordine_fornitore(mappa_dati_pdf)
+                            nome_file_generato = f"Lettera_Ordine_PREV_{id_p_scelto}_CIG_{cig_input.strip().upper()}.pdf"
+                            
+                            caricato_su_drive = carica_su_drive_unico(pdf_bytes, nome_file_generato, "application/pdf", id_cartella_ordini)
+                            
+                            if caricato_su_drive:
+                                st.success(f"📦 Atto d'ordine archiviato nel cloud di Istituto con successo!")
+                            else:
+                                st.warning("Atto d'ordine approvato internamente, ma si è verificato un errore di comunicazione con la cartella Google Drive.")
+                                
+                            st.download_button(
+                                label="📥 Scarica Copia Locale Lettera d'Ordine (PDF)",
+                                data=pdf_bytes,
+                                file_name=nome_file_generato,
+                                mime_type="application/pdf",
+                                use_container_width=True
+                            )
+                            st.balloons()
+                            st.rerun()
