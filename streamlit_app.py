@@ -87,7 +87,6 @@ def scarica_da_sheet(nome_scheda):
         worksheet = sh.worksheet(nome_scheda)
         df = pd.DataFrame(worksheet.get_all_records())
         
-        # Allineamento forzato e pulizia colonne per evitare KeyError futuri
         if "Registro_Preventivi" in nome_scheda:
             colonne_obbligatorie = ["id_preventivo", "id_richiesta_mag", "fornitore", "importo_ivato", "data_inserimento", "stato_approvazione", "note", "cig", "determina"]
             for col in colonne_obbligatorie:
@@ -392,7 +391,7 @@ if "action" in query_params and "id" in query_params:
             idx = idx_lista[0]
             if df_f.at[idx, "stato"] == "In attesa di approvazione":
                 nuovo_stato = "In lavorazione" if (azione == "approve" and df_f.at[idx, "categoria_bene"] == "PC Notebook") else ("Lavorata" if azione == "approve" else "Rifiutata")
-                df_f.at[idx, "stato"] = nuevo_stato
+                df_f.at[idx, "stato"] = nuovo_stato
                 carica_su_sheet(df_f, "Richieste_Preside")
                 if azione == "approve":
                     invia_notifica_approvata_preside(id_req, df_f.at[idx, "email_utente"], df_f.at[idx, "oggetto"], df_f.at[idx, "categoria_bene"])
@@ -426,7 +425,7 @@ if st.session_state.ruolo_utente is None:
                     if nome.strip() and email_ut.strip():
                         st.session_state.ruolo_utente = "collaboratore"
                         st.session_state.utente_corrente = nome.strip()
-                        st.session_state.ruolo_specifico = ruolo
+                        st.session_state.ruolo_specifico = Carroll = ruolo
                         st.session_state.email_utente = email_ut.strip()
                         st.rerun()
                     else: st.error("Compila tutti i campi.")
@@ -540,7 +539,7 @@ else:
             
             with tab_pronte:
                 pronte = df_istanze[df_istanze["stato"] == "Lavorata"] if not df_istanze.empty else pd.DataFrame()
-                if pronte.empty: st.info("Nessuna pratica in attesa di consegna materiale.")
+                if pronte.empty: st.info("Nessuna pratica in attesa di consegna material.")
                 else:
                     for _, riga in pronte.iterrows():
                         with st.expander(f"📦 Consegna a {riga['richiedente']} [{riga['categoria_bene']}]"):
