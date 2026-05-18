@@ -16,18 +16,12 @@ def mostra_interfaccia_preventivi(scarica_da_sheet, carica_su_sheet, invia_email
     df_preventivi = scarica_da_sheet("Registro_Preventivi")
     df_fornitori = scarica_da_sheet("Anagrafica_Fornitori")
     
-    # Controllo colonne anagrafica obbligatorie
-    colonne_rubrica = ["id_fornitore", "ragione_sociale", "partita_iva", "indirizzo", "email_contatto"]
-    for col in colonne_rubrica:
-        if col not in df_fornitori.columns:
-            df_fornitori[col] = ""
-
     # ---------------------------------------------------------
     # TAB 1: FABBISOGNI
     # ---------------------------------------------------------
     with tab_richieste:
         st.markdown("### Elenco materiali segnalati dai capigruppo logistici")
-        if df_fabbisogni.empty:
+        if df_fabbisogni.empty or len(df_fabbisogni) == 0:
             st.info("Nessuna segnalazione di fabbisogno aperta al momento.")
         else:
             st.dataframe(df_fabbisogni, use_container_width=True, hide_index=True)
@@ -64,15 +58,16 @@ def mostra_interfaccia_preventivi(scarica_da_sheet, carica_su_sheet, invia_email
                         st.success(f"Ditta '{rag_soc.strip()}' registrata in rubrica!")
                         st.rerun()
                         
-        if df_fornitori.empty or len(df_fornitori[df_fornitori["ragione_sociale"] != ""]) == 0:
+        df_fornitori_attivi = df_fornitori[df_fornitori["ragione_sociale"].get(df_fornitori["ragione_sociale"] != "").any() if not df_fornitori.empty else False]
+        df_fornitori_attivi = df_fornitori[df_fornitori["ragione_sociale"].astype(str).str.strip() != ""] if not df_fornitori.empty else pd.DataFrame()
+
+        if df_fornitori_attivi.empty:
             st.info("Nessun fornitore salvato in rubrica. Aggiungine uno sopra per evitare di digitarlo a mano.")
         else:
             st.markdown("#### Aziende Censite a Registro")
-            # Filtriamo righe vuote di sistema
-            df_fornitori_vis = df_fornitori[df_fornitori["ragione_sociale"] != ""]
-            st.dataframe(df_fornitori_vis, use_container_width=True, hide_index=True)
+            st.dataframe(df_fornitori_attivi, use_container_width=True, hide_index=True)
             
-            elenco_cancellabili = [f"{f['id_fornitore']} - {f['ragione_sociale']}" for _, f in df_fornitori_vis.iterrows()]
+            elenco_cancellabili = [f"{f['id_fornitore']} - {f['ragione_sociale']}" for _, f in df_fornitori_attivi.iterrows()]
             da_eliminare = st.selectbox("Seleziona eventuale ditta da rimuovere:", [""] + elenco_cancellabili)
             if da_eliminare and st.button("🗑️ Rimuovi Fornitore Selezionato", type="secondary"):
                 id_da_rim = da_eliminare.split(" - ")[0]
@@ -86,7 +81,6 @@ def mostra_interfaccia_preventivi(scarica_da_sheet, carica_su_sheet, invia_email
     # ---------------------------------------------------------
     with tab_inserimento:
         st.markdown("### Collega un preventivo economico a una richiesta interna")
-        df_fornitori_attivi = df_fornitori[df_fornitori["ragione_sociale"] != ""] if not df_fornitori.empty else pd.DataFrame()
         
         if df_fabbisogni.empty:
             st.warning("Per inserire un preventivo deve essere presente almeno un fabbisogno aperto.")
@@ -100,18 +94,21 @@ def mostra_interfaccia_preventivi(scarica_da_sheet, carica_su_sheet, invia_email
             with st.form("form_aggiunta_preventivo"):
                 st.markdown("##### 🏢 Selezione Fornitore da Rubrica")
                 
-                opzioni_rubrica = [f"{f['ragione_sociale']} (P.IVA: {f['partita_iva']})" for _, f in df_fornitori_attivi.iterrows()]
-                fornitore_selezionato_rubrica = st.selectbox("Scegli la ditta (prenderà i dati in automatico):", opzioni_rubrica)
+                # Mappa dizionario per evitare l'uso di .iloc rischioso sugli indici sballati
+                mappa_nomi = {}
+                opzioni_rubrica = []
+                for _, f in df_fornitori_attivi.iterrows():
+                    testo_chiave = f"{f['ragione_sociale']} (P.IVA: {f['partita_iva']})"
+                    opzioni_rubrica.append(testo_chiave)
+                    mappa_nomi[testo_chiave] = f
                 
+                fornitore_selezionato_rubrica = st.selectbox("Scegli la ditta (prenderà i dati in automatico):", opzioni_rubrica)
                 importo_lordo = st.number_input("Importo Totale IVATO (€):", min_value=0.0, step=0.01)
                 note_preventivo = st.text_area("Note aggiuntive / Condizioni di consegna:")
                 
                 if st.form_submit_button("Registra preventivo a sistema"):
-                    # Estrazione sicura posizionale basata sulla stringa visualizzata
-                    idx_f_scelta = [f"{f['ragione_sociale']} (P.IVA: {f['partita_iva']})" == fornitore_selezionato_rubrica for _, f in df_fornitori_attivi.iterrows()].index(True)
-                    f_dati = df_fornitori_attivi.iloc[idx_f_scelta]
+                    f_dati = mappa_nomi[fornitore_selezionato_rubrica]
                     
-                    # Costruiamo il blocco dell'intestazione per la lettera d'ordine
                     blocco_spett_le = f"{f_dati['ragione_sociale']}\nSede Legale: {f_dati['indirizzo']}\nP.IVA / C.F.: {f_dati['partita_iva']}\nContatto: {f_dati['email_contatto']}"
                     
                     id_prev_num = pd.to_numeric(df_preventivi["id_preventivo"], errors='coerce')
@@ -137,13 +134,17 @@ def mostra_interfaccia_preventivi(scarica_da_sheet, carica_su_sheet, invia_email
     # ---------------------------------------------------------
     with tab_registro_finito:
         st.markdown("### Valutazione, Approvazione ed Emissione Lettera d'Ordine")
-        if df_preventivi.empty:
+        
+        # Filtro protetto contro le celle vuote introdotte dall'allineamento automatico
+        df_preventivi_validi = df_preventivi[df_preventivi["id_preventivo"].astype(str).str.strip() != ""] if not df_preventivi.empty else pd.DataFrame()
+        
+        if df_preventivi_validi.empty:
             st.info("Nessun preventivo registrato a storico.")
         else:
-            st.dataframe(df_preventivi, use_container_width=True, hide_index=True)
+            st.dataframe(df_preventivi_validi, use_container_width=True, hide_index=True)
             st.markdown("---")
             
-            preventivi_valutabili = df_preventivi[df_preventivi["stato_approvazione"] == "In valutazione"]
+            preventivi_valutabili = df_preventivi_validi[df_preventivi_validi["stato_approvazione"] == "In valutazione"]
             if preventivi_valutabili.empty:
                 st.info("Tutti i preventivi inseriti sono già stati lavorati o emessi.")
             else:
@@ -152,7 +153,7 @@ def mostra_interfaccia_preventivi(scarica_da_sheet, carica_su_sheet, invia_email
                 scelta_p = st.selectbox("Seleziona il preventivo da deliberare ed ordinare:", opzioni_preventivo)
                 id_p_scelto = scelta_p.split(" - ")[0].replace("PREV ID ", "").strip()
                 
-                riga_p = df_preventivi[df_preventivi["id_preventivo"].astype(str) == str(id_p_scelto)].iloc[0]
+                riga_p = df_preventivi_validi[df_preventivi_validi["id_preventivo"].astype(str) == str(id_p_scelto)].iloc[0]
                 
                 st.markdown("##### 📄 Dati per Atto d'Ordine d'Istituto")
                 c1, c2 = st.columns(2)
@@ -165,7 +166,7 @@ def mostra_interfaccia_preventivi(scarica_da_sheet, carica_su_sheet, invia_email
                     prot_inst = st.text_input("Protocollo ingresso ISISS Scarpa:", placeholder="Es. 0004120/E")
                     qta_input = st.number_input("Quantità complessiva colli/beni:", min_value=1, value=1)
                 
-                riga_fabb = df_fabbisogni[df_fabbisogni["id_richiesta_mag"].astype(str) == str(riga_p["id_richiesta_mag"])]
+                riga_fabb = df_fabbisogni[df_fabbisogni["id_richiesta_mag"].astype(str) == str(riga_p["id_richiesta_mag"])] if not df_fabbisogni.empty else pd.DataFrame()
                 materiale_desc = riga_fabb.iloc[0]["materiale_richiesto"] if not riga_fabb.empty else "Fornitura Beni da Magazzino"
                 
                 if st.button("🔴 COMPLETA E INVIA PREVENTIVO A REGISTRO", type="primary", use_container_width=True):
@@ -174,7 +175,7 @@ def mostra_interfaccia_preventivi(scarica_da_sheet, carica_su_sheet, invia_email
                     else:
                         mappa_dati_pdf = {
                             "fornitore": riga_p["fornitore"],
-                            "oggetto_ordine": f"Affidamento diretto fornitura materiale d'istituto - Richiesta Magazzino ID {riga_p['id_richiesta_mag']}",
+                            "oggetto_ordine": f"Affidamento directo fornitura materiale d'istituto - Richiesta Magazzino ID {riga_p['id_richiesta_mag']}",
                             "data_preventivo": data_prev_forn,
                             "protocollo_fornitore": prot_forn,
                             "protocollo_istituto": prot_inst,
